@@ -49,11 +49,15 @@ datasets:
     root_path: "./data/faceforensics"
     frame_format: "png"
     manipulation_types:
-      - "Deepfakes"
       - "original"
+      - "Deepfakes"
+      - "Face2Face"
+      - "FaceSwap"
+      - "FaceShifter"
+      - "NeuralTextures"
+      - "DeepFakeDetection"
     compression: "c23"
     test_split: 0.2
-    kaggle_format: true
 
 evaluation:
   few_shot_k: [2, 4, 8]

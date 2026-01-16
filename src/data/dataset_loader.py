@@ -41,15 +41,19 @@ class DeepfakeDataset:
             self.samples = random.sample(self.samples, self.max_samples)
     
     def _load_celebdf(self):
-        real_dir = self.root_path / "Celeb-real"
+        real_dirs = [
+            self.root_path / "Celeb-real",
+            self.root_path / "YouTube-real",
+        ]
         fake_dir = self.root_path / "Celeb-synthesis"
         
-        if real_dir.exists():
-            for video_dir in real_dir.iterdir():
-                if video_dir.is_dir():
-                    frames = list(video_dir.glob(f"*.{self.frame_format}"))
-                    for frame in frames:
-                        self.samples.append((frame, 0, "real"))
+        for real_dir in real_dirs:
+            if real_dir.exists():
+                for video_dir in real_dir.iterdir():
+                    if video_dir.is_dir():
+                        frames = list(video_dir.glob(f"*.{self.frame_format}"))
+                        for frame in frames:
+                            self.samples.append((frame, 0, "real"))
         
         if fake_dir.exists():
             for video_dir in fake_dir.iterdir():
@@ -85,7 +89,9 @@ class DeepfakeDataset:
             "Deepfakes": 1,
             "Face2Face": 1,
             "FaceSwap": 1,
+            "FaceShifter": 1,
             "NeuralTextures": 1,
+            "DeepFakeDetection": 1,
             "original_sequences": 0,
             "original": 0,
             "real": 0,
