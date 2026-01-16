@@ -1,0 +1,65 @@
+models:
+  qwen_vl:
+    name: "Qwen2.5-VL-7B"
+    hub_id: "Qwen/Qwen2.5-VL-7B-Instruct"
+    quantization: "4bit"
+    torch_dtype: "bfloat16"
+    max_new_tokens: 256
+    batch_size: 4
+
+  minicpm_v:
+    name: "MiniCPM-V-2.6"
+    hub_id: "openbmb/MiniCPM-V-2_6"
+    quantization: "4bit"
+    torch_dtype: "bfloat16"
+    max_new_tokens: 256
+    batch_size: 4
+
+  moondream:
+    name: "MoonDream2"
+    hub_id: "vikhyatk/moondream2"
+    quantization: "none"
+    torch_dtype: "float16"
+    max_new_tokens: 256
+    batch_size: 8
+
+  internvl:
+    name: "InternVL2-4B"
+    hub_id: "OpenGVLab/InternVL2-4B"
+    quantization: "4bit"
+    torch_dtype: "bfloat16"
+    max_new_tokens: 256
+    batch_size: 4
+
+  llava_next:
+    name: "LLaVA-NeXT-7B"
+    hub_id: "llava-hf/llava-v1.6-mistral-7b-hf"
+    quantization: "4bit"
+    torch_dtype: "bfloat16"
+    max_new_tokens: 256
+    batch_size: 4
+
+datasets:
+  celebdf:
+    root_path: "./data/celeb_df"
+    frame_format: "jpg"
+    test_split: 0.2
+
+  faceforensics:
+    root_path: "./data/faceforensics"
+    frame_format: "png"
+    manipulation_types:
+      - "Deepfakes"
+      - "original"
+    compression: "c23"
+    test_split: 0.2
+    kaggle_format: true
+
+evaluation:
+  few_shot_k: [2, 4, 8]
+  metrics:
+    - "auc"
+    - "accuracy"
+    - "f1"
+    - "precision"
+    - "recall"
