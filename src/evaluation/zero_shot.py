@@ -118,7 +118,9 @@ class ZeroShotEvaluator:
                 )
                 all_results[model_name] = results
             except Exception as e:
+                import traceback
                 print(f"Error evaluating {model_name}: {e}")
+                traceback.print_exc()
                 all_results[model_name] = {"error": str(e)}
         
         self._save_results(all_results, dataset_name, "zero_shot")

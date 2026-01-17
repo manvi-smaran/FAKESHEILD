@@ -7,10 +7,10 @@ models:
     max_new_tokens: 256
     batch_size: 4
 
-  phi3_vision:
-    name: "Phi-3-Vision-128k"
-    hub_id: "microsoft/Phi-3-vision-128k-instruct"
-    quantization: "4bit"
+  smolvlm:
+    name: "SmolVLM-Instruct"
+    hub_id: "HuggingFaceTB/SmolVLM-Instruct"
+    quantization: "none"
     torch_dtype: "bfloat16"
     max_new_tokens: 256
     batch_size: 4
@@ -24,9 +24,9 @@ models:
     batch_size: 8
 
   internvl:
-    name: "InternVL2-4B"
-    hub_id: "OpenGVLab/InternVL2-4B"
-    quantization: "4bit"
+    name: "InternVL2-2B"
+    hub_id: "OpenGVLab/InternVL2-2B"
+    quantization: "none"
     torch_dtype: "bfloat16"
     max_new_tokens: 256
     batch_size: 4
