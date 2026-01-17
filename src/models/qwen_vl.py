@@ -12,13 +12,25 @@ class QwenVL(BaseVSLM):
         
         quant_config = self.get_quantization_config()
         
-        self.model = Qwen2VLForConditionalGeneration.from_pretrained(
-            self.config["hub_id"],
-            torch_dtype=self.get_torch_dtype(),
-            quantization_config=quant_config,
-            device_map="auto",
-            trust_remote_code=True,
-        )
+        try:
+            self.model = Qwen2VLForConditionalGeneration.from_pretrained(
+                self.config["hub_id"],
+                torch_dtype=self.get_torch_dtype(),
+                quantization_config=quant_config,
+                device_map="auto",
+                trust_remote_code=True,
+                attn_implementation="eager",
+            )
+        except Exception as e:
+            print(f"Quantized loading failed: {e}")
+            print("Falling back to FP16 without quantization...")
+            self.model = Qwen2VLForConditionalGeneration.from_pretrained(
+                self.config["hub_id"],
+                torch_dtype=torch.float16,
+                device_map="auto",
+                trust_remote_code=True,
+                attn_implementation="eager",
+            )
         
         self.processor = AutoProcessor.from_pretrained(
             self.config["hub_id"],

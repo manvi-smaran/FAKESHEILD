@@ -12,17 +12,41 @@ from sklearn.metrics import (
 
 
 def parse_prediction(response: str) -> int:
-    response_lower = response.lower()
+    response_lower = response.lower().strip()
     
-    fake_keywords = ["fake", "manipulated", "deepfake", "synthetic", "generated", "altered", "forged"]
-    real_keywords = ["real", "authentic", "genuine", "original", "unaltered", "natural"]
+    # Check for direct yes/no at the start (common for short model responses)
+    # "Is this fake?" -> Yes = Fake, No = Real
+    # We assume the prompt asks "is this fake/deepfake?"
+    if response_lower.startswith("yes"):
+        return 1  # Fake
+    if response_lower.startswith("no"):
+        return 0  # Real
     
+    fake_keywords = [
+        "fake", "manipulated", "deepfake", "synthetic", 
+        "generated", "altered", "forged", "artificial",
+        "not real", "not authentic", "not genuine",
+    ]
+    real_keywords = [
+        "real", "authentic", "genuine", "original", 
+        "unaltered", "natural", "not fake", "not manipulated",
+    ]
+    
+    # Check for negations first (more specific)
     for keyword in fake_keywords:
-        if keyword in response_lower:
+        if keyword.startswith("not ") and keyword in response_lower:
+            return 1
+    for keyword in real_keywords:
+        if keyword.startswith("not ") and keyword in response_lower:
+            return 0
+    
+    # Then check positive keywords
+    for keyword in fake_keywords:
+        if not keyword.startswith("not ") and keyword in response_lower:
             return 1
     
     for keyword in real_keywords:
-        if keyword in response_lower:
+        if not keyword.startswith("not ") and keyword in response_lower:
             return 0
     
     return -1
