@@ -2,14 +2,14 @@ from .base_vslm import BaseVSLM
 from .qwen_vl import QwenVL
 from .smolvlm import SmolVLM
 from .moondream import MoonDream
-from .internvl import InternVL
+from .florence2 import Florence2
 from .llava_next import LLaVANext
 
 MODEL_REGISTRY = {
     "qwen_vl": QwenVL,
     "smolvlm": SmolVLM,
     "moondream": MoonDream,
-    "internvl": InternVL,
+    "florence2": Florence2,
     "llava_next": LLaVANext,
 }
 

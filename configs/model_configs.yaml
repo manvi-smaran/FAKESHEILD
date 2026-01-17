@@ -23,11 +23,11 @@ models:
     max_new_tokens: 256
     batch_size: 8
 
-  internvl:
-    name: "InternVL2-2B"
-    hub_id: "OpenGVLab/InternVL2-2B"
+  florence2:
+    name: "Florence-2-base"
+    hub_id: "microsoft/Florence-2-base"
     quantization: "none"
-    torch_dtype: "bfloat16"
+    torch_dtype: "float16"
     max_new_tokens: 256
     batch_size: 4
 
