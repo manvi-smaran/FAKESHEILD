@@ -1,13 +1,13 @@
 from .base_vslm import BaseVSLM
 from .qwen_vl import QwenVL
-from .minicpm_v import MiniCPMV
+from .phi3_vision import Phi3Vision
 from .moondream import MoonDream
 from .internvl import InternVL
 from .llava_next import LLaVANext
 
 MODEL_REGISTRY = {
     "qwen_vl": QwenVL,
-    "minicpm_v": MiniCPMV,
+    "phi3_vision": Phi3Vision,
     "moondream": MoonDream,
     "internvl": InternVL,
     "llava_next": LLaVANext,

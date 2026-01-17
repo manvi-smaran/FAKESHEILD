@@ -1,15 +1,15 @@
 models:
   qwen_vl:
-    name: "Qwen2.5-VL-7B"
-    hub_id: "Qwen/Qwen2.5-VL-7B-Instruct"
-    quantization: "4bit"
+    name: "Qwen2-VL-2B"
+    hub_id: "Qwen/Qwen2-VL-2B-Instruct"
+    quantization: "none"
     torch_dtype: "bfloat16"
     max_new_tokens: 256
     batch_size: 4
 
-  minicpm_v:
-    name: "MiniCPM-V-2.6"
-    hub_id: "openbmb/MiniCPM-V-2_6"
+  phi3_vision:
+    name: "Phi-3-Vision-128k"
+    hub_id: "microsoft/Phi-3-vision-128k-instruct"
     quantization: "4bit"
     torch_dtype: "bfloat16"
     max_new_tokens: 256
