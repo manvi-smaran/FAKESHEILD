@@ -16,11 +16,13 @@ class Florence2(BaseVSLM):
             trust_remote_code=True,
         )
         
+        # Load with explicit attention implementation for compatibility
         self.model = AutoModelForCausalLM.from_pretrained(
             self.config["hub_id"],
             torch_dtype=self.get_torch_dtype(),
             device_map="auto",
             trust_remote_code=True,
+            attn_implementation="eager",  # Avoid SDPA issues
         )
         self.model.eval()
     

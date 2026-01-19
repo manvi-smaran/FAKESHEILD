@@ -14,7 +14,7 @@ def main():
         "--model",
         type=str,
         default=None,
-        choices=["qwen_vl", "minicpm_v", "moondream", "internvl", "llava_next"],
+        choices=["qwen_vl", "smolvlm", "moondream", "florence2", "llava_next"],
         help="Specific model to evaluate. If not provided, evaluates all models.",
     )
     
