@@ -200,6 +200,7 @@ class LoRATrainer:
         train_dataset, val_dataset = self.create_dataloaders(max_samples)
         
         # Training arguments
+        use_fp16 = torch.cuda.is_available()
         training_args = TrainingArguments(
             output_dir=str(self.output_dir),
             num_train_epochs=self.num_epochs,
@@ -215,7 +216,7 @@ class LoRATrainer:
             save_strategy="epoch",
             save_total_limit=2,
             load_best_model_at_end=True,
-            fp16=True,
+            fp16=use_fp16,
             dataloader_pin_memory=False,
             remove_unused_columns=False,
             report_to="none",
@@ -265,8 +266,17 @@ class LoRATrainer:
                 "labels": input_ids.clone(),  # For causal LM
             }
             
+            # Handle variable-size pixel_values by padding
             if batch_pixel_values:
-                result["pixel_values"] = torch.stack(batch_pixel_values)
+                max_patches = max(pv.shape[0] for pv in batch_pixel_values)
+                padded_pixel_values = []
+                for pv in batch_pixel_values:
+                    if pv.shape[0] < max_patches:
+                        # Pad with zeros
+                        padding = torch.zeros(max_patches - pv.shape[0], *pv.shape[1:], dtype=pv.dtype)
+                        pv = torch.cat([pv, padding], dim=0)
+                    padded_pixel_values.append(pv)
+                result["pixel_values"] = torch.stack(padded_pixel_values)
             
             return result
         
