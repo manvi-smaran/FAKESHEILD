@@ -9,6 +9,7 @@ from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 import json
 import yaml
+import random
 
 
 class DeepfakeFineTuneDataset(Dataset):
@@ -16,71 +17,56 @@ class DeepfakeFineTuneDataset(Dataset):
     
     def __init__(
         self,
-        data_dir: str,
+        config_path: str,
+        dataset_name: str,
         processor,
         split: str = "train",
         max_samples: Optional[int] = None,
     ):
-        self.data_dir = Path(data_dir)
         self.processor = processor
         self.split = split
         
-        # Load samples
-        self.samples = self._load_samples(max_samples)
+        # Load config
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f)
+        
+        # Use existing dataset loader
+        from src.data.dataset_loader import create_dataset
+        full_dataset = create_dataset(config, dataset_name, max_samples)
+        
+        # Get all samples
+        all_samples = full_dataset.samples
+        
+        # Shuffle with seed
+        random.seed(42)
+        random.shuffle(all_samples)
+        
+        # Split train/val (80/20)
+        split_idx = int(len(all_samples) * 0.8)
+        if self.split == "train":
+            self.samples = all_samples[:split_idx]
+        else:
+            self.samples = all_samples[split_idx:]
         
         # Prompt template for training
         self.prompt = """Analyze this image of a human face carefully.
 Is this a real photograph or a deepfake/AI-manipulated image?
 Answer with 'Real' or 'Fake' followed by a brief explanation."""
-    
-    def _load_samples(self, max_samples: Optional[int]) -> List[Dict]:
-        """Load image paths and labels."""
-        samples = []
         
-        # Load real images
-        real_dir = self.data_dir / "Celeb-real"
-        if real_dir.exists():
-            for img_path in real_dir.glob("*.jpg"):
-                samples.append({
-                    "image_path": str(img_path),
-                    "label": 0,
-                    "label_text": "Real",
-                    "response": "Real. This appears to be an authentic photograph with natural skin texture, consistent lighting, and no visible manipulation artifacts."
-                })
-        
-        # Load fake images
-        fake_dir = self.data_dir / "Celeb-synthesis"
-        if fake_dir.exists():
-            for img_path in fake_dir.glob("*.jpg"):
-                samples.append({
-                    "image_path": str(img_path),
-                    "label": 1,
-                    "label_text": "Fake",
-                    "response": "Fake. This image shows signs of deepfake manipulation including subtle blending artifacts around facial boundaries and inconsistencies in texture."
-                })
-        
-        # Shuffle and limit
-        import random
-        random.shuffle(samples)
-        
-        if max_samples:
-            samples = samples[:max_samples]
-        
-        # Split train/val (80/20)
-        split_idx = int(len(samples) * 0.8)
-        if self.split == "train":
-            return samples[:split_idx]
-        else:
-            return samples[split_idx:]
+        # Response templates
+        self.responses = {
+            0: "Real. This appears to be an authentic photograph with natural skin texture, consistent lighting, and no visible manipulation artifacts.",
+            1: "Fake. This image shows signs of deepfake manipulation including subtle blending artifacts around facial boundaries and inconsistencies in texture."
+        }
     
     def __len__(self):
         return len(self.samples)
     
     def __getitem__(self, idx):
-        sample = self.samples[idx]
+        frame_path, label, manip_type = self.samples[idx]
         
         # Load image
-        image = Image.open(sample["image_path"]).convert("RGB")
+        image = Image.open(frame_path).convert("RGB")
         
         # Create conversation format for SmolVLM
         messages = [
@@ -94,7 +80,7 @@ Answer with 'Real' or 'Fake' followed by a brief explanation."""
             {
                 "role": "assistant",
                 "content": [
-                    {"type": "text", "text": sample["response"]}
+                    {"type": "text", "text": self.responses[label]}
                 ]
             }
         ]
@@ -102,7 +88,7 @@ Answer with 'Real' or 'Fake' followed by a brief explanation."""
         return {
             "image": image,
             "messages": messages,
-            "label": sample["label"],
+            "label": label,
         }
 
 
@@ -134,6 +120,8 @@ class LoRATrainer:
         self.model = None
         self.processor = None
         self.tokenizer = None
+        self.config_path = "configs/model_configs.yaml"
+        self.dataset_name = "celebdf"
     
     def setup(self):
         """Load model and apply LoRA."""
@@ -175,19 +163,20 @@ class LoRATrainer:
     
     def create_dataloaders(
         self,
-        data_dir: str,
         max_samples: Optional[int] = None,
     ):
         """Create train and validation dataloaders."""
         train_dataset = DeepfakeFineTuneDataset(
-            data_dir=data_dir,
+            config_path=self.config_path,
+            dataset_name=self.dataset_name,
             processor=self.processor,
             split="train",
             max_samples=max_samples,
         )
         
         val_dataset = DeepfakeFineTuneDataset(
-            data_dir=data_dir,
+            config_path=self.config_path,
+            dataset_name=self.dataset_name,
             processor=self.processor,
             split="val",
             max_samples=max_samples,
@@ -200,7 +189,6 @@ class LoRATrainer:
     
     def train(
         self,
-        data_dir: str,
         max_samples: Optional[int] = None,
     ):
         """Run LoRA fine-tuning."""
@@ -209,7 +197,7 @@ class LoRATrainer:
         if self.model is None:
             self.setup()
         
-        train_dataset, val_dataset = self.create_dataloaders(data_dir, max_samples)
+        train_dataset, val_dataset = self.create_dataloaders(max_samples)
         
         # Training arguments
         training_args = TrainingArguments(
@@ -309,7 +297,7 @@ class LoRATrainer:
         
         return trainer
     
-    def evaluate(self, data_dir: str, max_samples: int = 100):
+    def evaluate(self, max_samples: int = 100):
         """Evaluate the fine-tuned model."""
         from src.evaluation.metrics import parse_prediction, compute_metrics
         
@@ -317,7 +305,8 @@ class LoRATrainer:
             raise ValueError("Model not loaded. Call setup() or train() first.")
         
         val_dataset = DeepfakeFineTuneDataset(
-            data_dir=data_dir,
+            config_path=self.config_path,
+            dataset_name=self.dataset_name,
             processor=self.processor,
             split="val",
             max_samples=max_samples,
@@ -392,7 +381,8 @@ Answer with 'Real' or 'Fake'."""
 
 
 def run_lora_finetuning(
-    data_dir: str = "./data/celeb_df",
+    config_path: str = "configs/model_configs.yaml",
+    dataset_name: str = "celebdf",
     output_dir: str = "checkpoints/smolvlm-lora",
     max_samples: Optional[int] = None,
     num_epochs: int = 3,
@@ -407,9 +397,13 @@ def run_lora_finetuning(
         num_epochs=num_epochs,
     )
     
-    trainer.train(data_dir=data_dir, max_samples=max_samples)
+    # Set config path and dataset
+    trainer.config_path = config_path
+    trainer.dataset_name = dataset_name
+    
+    trainer.train(max_samples=max_samples)
     
     # Evaluate
-    metrics = trainer.evaluate(data_dir=data_dir)
+    metrics = trainer.evaluate()
     
     return trainer, metrics

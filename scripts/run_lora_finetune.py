@@ -3,7 +3,7 @@
 Run LoRA Fine-Tuning for SmolVLM on Deepfake Detection
 
 Usage:
-    python scripts/run_lora_finetune.py --data_dir ./data/celeb_df --epochs 3 --max_samples 1000
+    python scripts/run_lora_finetune.py --dataset celebdf --epochs 3 --max_samples 1000
 """
 import argparse
 import sys
@@ -18,10 +18,18 @@ def main():
     parser = argparse.ArgumentParser(description="Run LoRA Fine-Tuning for SmolVLM")
     
     parser.add_argument(
-        "--data_dir",
+        "--config",
         type=str,
-        default="./data/celeb_df",
-        help="Path to CelebDF dataset directory",
+        default="configs/model_configs.yaml",
+        help="Path to config file",
+    )
+    
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="celebdf",
+        choices=["celebdf", "faceforensics"],
+        help="Dataset to train on",
     )
     
     parser.add_argument(
@@ -64,7 +72,8 @@ def main():
     print("\n" + "="*60)
     print("SmolVLM LoRA Fine-Tuning for Deepfake Detection")
     print("="*60)
-    print(f"Data Directory: {args.data_dir}")
+    print(f"Config: {args.config}")
+    print(f"Dataset: {args.dataset}")
     print(f"Output Directory: {args.output_dir}")
     print(f"Max Samples: {args.max_samples or 'ALL'}")
     print(f"Epochs: {args.epochs}")
@@ -74,7 +83,8 @@ def main():
     
     # Run training
     trainer, metrics = run_lora_finetuning(
-        data_dir=args.data_dir,
+        config_path=args.config,
+        dataset_name=args.dataset,
         output_dir=args.output_dir,
         max_samples=args.max_samples,
         num_epochs=args.epochs,
