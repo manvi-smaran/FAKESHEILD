@@ -137,7 +137,7 @@ class LoRATrainer:
         print("Loading model...")
         self.model = AutoModelForVision2Seq.from_pretrained(
             self.model_name,
-            torch_dtype=torch.bfloat16,
+            torch_dtype=torch.float16,
             device_map="auto",
             trust_remote_code=True,
         )
@@ -215,7 +215,7 @@ class LoRATrainer:
             save_strategy="epoch",
             save_total_limit=2,
             load_best_model_at_end=True,
-            bf16=True,
+            fp16=True,
             dataloader_pin_memory=False,
             remove_unused_columns=False,
             report_to="none",
@@ -240,14 +240,12 @@ class LoRATrainer:
                     add_generation_prompt=False,
                 )
                 
-                # Process inputs
+                # Process inputs - don't truncate to preserve image tokens
                 inputs = self.processor(
                     text=text,
                     images=[image],
                     return_tensors="pt",
-                    padding=True,
-                    truncation=True,
-                    max_length=512,
+                    padding=False,  # We'll pad manually after
                 )
                 
                 batch_input_ids.append(inputs["input_ids"].squeeze(0))
