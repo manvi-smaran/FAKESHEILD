@@ -241,7 +241,22 @@ Based on these example patterns, analyze the image and output ONLY JSON:"""
                         continue
                 
                 # Parse JSON response
-                parsed = parse_json_response(response)
+                # Handle case where model returns dict instead of string
+                if isinstance(response, dict):
+                    # Some models return {"label": ..., "text": ...} format
+                    if "label" in response:
+                        parsed = {
+                            "label": str(response.get("label", "unknown")).lower(),
+                            "p_fake": float(response.get("p_fake", response.get("confidence", 0.5))),
+                            "evidence": response.get("evidence", []),
+                            "parse_success": True,
+                        }
+                    elif "text" in response:
+                        parsed = parse_json_response(str(response["text"]))
+                    else:
+                        parsed = parse_json_response(str(response))
+                else:
+                    parsed = parse_json_response(str(response))
                 
                 # Handle parse failures - use pred=-1 for unknown
                 if parsed["label"] == "unknown":
@@ -371,12 +386,14 @@ def run_few_shot_evaluation(
             return evaluator.evaluate_model_json(model_name, dataset_name, k_values, max_samples)
         else:
             # Evaluate all models with JSON
+            import traceback
             all_results = {}
             for name in evaluator.config["models"].keys():
                 try:
                     all_results[name] = evaluator.evaluate_model_json(name, dataset_name, k_values, max_samples)
                 except Exception as e:
                     print(f"Error evaluating {name}: {e}")
+                    traceback.print_exc()  # Print full traceback for debugging
                     all_results[name] = {"error": str(e)}
             return all_results
     else:
