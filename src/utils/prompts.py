@@ -92,15 +92,15 @@ FORENSIC CHECKLIST:
 5. Compression pattern anomalies
 
 You must output ONLY valid JSON in this exact format:
-{"label":"real|fake","p_fake":0.0-1.0,"evidence":["reason1","reason2"]}"""
+{{"label":"real|fake","p_fake":0.0-1.0,"evidence":["reason1","reason2"]}}"""
 
 
 JSON_FEW_SHOT_EXAMPLE_REAL = """Image {idx}: REAL
-{"label":"real","p_fake":0.08,"evidence":["consistent facial boundaries","natural skin texture","coherent lighting"]}"""
+{{"label":"real","p_fake":0.08,"evidence":["consistent facial boundaries","natural skin texture","coherent lighting"]}}"""
 
 
 JSON_FEW_SHOT_EXAMPLE_FAKE = """Image {idx}: FAKE  
-{"label":"fake","p_fake":0.91,"evidence":["blending artifacts at jaw","inconsistent skin texture","unnatural eye reflections"]}"""
+{{"label":"fake","p_fake":0.91,"evidence":["blending artifacts at jaw","inconsistent skin texture","unnatural eye reflections"]}}"""
 
 
 JSON_FEW_SHOT_QUERY = """Now analyze the new image. Output ONLY the JSON:"""
