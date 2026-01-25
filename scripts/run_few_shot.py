@@ -31,7 +31,7 @@ def main():
         type=int,
         nargs="+",
         default=[2, 4, 8],
-        help="Number of few-shot examples (per class). Can specify multiple values.",
+        help="TOTAL number of few-shot examples (k//2 per class). E.g., k=4 means 2 real + 2 fake examples.",
     )
     
     parser.add_argument(
@@ -48,23 +48,34 @@ def main():
         help="Path to configuration file.",
     )
     
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Use JSON-based prompts with structured output (recommended for publication).",
+    )
+    
     args = parser.parse_args()
     
+    eval_type = "JSON Few-Shot" if args.json else "Few-Shot"
+    
     print(f"\n{'='*60}")
-    print(f"VSLM Few-Shot Deepfake Detection Evaluation")
+    print(f"VSLM {eval_type} Deepfake Detection Evaluation")
     print(f"{'='*60}")
     print(f"Model:       {args.model or 'ALL'}")
     print(f"Dataset:     {args.dataset}")
     print(f"K values:    {args.k}")
     print(f"Max Samples: {args.max_samples or 'ALL'}")
+    print(f"JSON Mode:   {args.json}")
     print(f"{'='*60}\n")
     
+    # Use unified function with use_json parameter
     results = run_few_shot_evaluation(
         model_name=args.model,
         dataset_name=args.dataset,
         k_values=args.k,
         max_samples=args.max_samples,
         config_path=args.config,
+        use_json=args.json,
     )
     
     return results
@@ -72,3 +83,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

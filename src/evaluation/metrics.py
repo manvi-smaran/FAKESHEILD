@@ -12,41 +12,54 @@ from sklearn.metrics import (
 
 
 def parse_prediction(response: str) -> int:
+    """
+    Parse prediction from model response with proper negation handling.
+    Uses boundary-aware regex to avoid false matches.
+    """
+    import re
+    
     response_lower = response.lower().strip()
     
     # Check for direct yes/no at the start (common for short model responses)
     # "Is this fake?" -> Yes = Fake, No = Real
-    # We assume the prompt asks "is this fake/deepfake?"
     if response_lower.startswith("yes"):
         return 1  # Fake
-    if response_lower.startswith("no"):
-        return 0  # Real
+    if response_lower.startswith("no ") or response_lower == "no":
+        return 0  # Real (but not "not" which starts with "no")
     
-    fake_keywords = [
-        "fake", "manipulated", "deepfake", "synthetic", 
-        "generated", "altered", "forged", "artificial",
-        "not real", "not authentic", "not genuine",
+    # Boundary-aware negation patterns (check FIRST - more specific)
+    # Matches: "not fake", "not a fake", "isn't fake", "is not fake"
+    not_fake_pattern = r'\b(not\s+(a\s+)?fake|isn\'?t\s+(a\s+)?fake|is\s+not\s+(a\s+)?fake)\b'
+    not_real_pattern = r'\b(not\s+(a\s+)?real|isn\'?t\s+real|is\s+not\s+real)\b'
+    not_deepfake_pattern = r'\b(not\s+(a\s+)?deepfake|isn\'?t\s+(a\s+)?deepfake)\b'
+    not_manipulated_pattern = r'\b(not\s+manipulated|isn\'?t\s+manipulated)\b'
+    
+    # Check negations first
+    if re.search(not_fake_pattern, response_lower):
+        return 0  # "not fake" = Real
+    if re.search(not_deepfake_pattern, response_lower):
+        return 0  # "not deepfake" = Real
+    if re.search(not_manipulated_pattern, response_lower):
+        return 0  # "not manipulated" = Real
+    if re.search(not_real_pattern, response_lower):
+        return 1  # "not real" = Fake
+    
+    # Boundary-aware positive patterns (word boundaries prevent partial matches)
+    fake_patterns = [
+        r'\b(fake|deepfake|manipulated|synthetic|generated|altered|forged|artificial)\b',
     ]
-    real_keywords = [
-        "real", "authentic", "genuine", "original", 
-        "unaltered", "natural", "not fake", "not manipulated",
+    real_patterns = [
+        r'\b(real|authentic|genuine|original|unaltered|natural)\b',
     ]
     
-    # Check for negations first (more specific)
-    for keyword in fake_keywords:
-        if keyword.startswith("not ") and keyword in response_lower:
-            return 1
-    for keyword in real_keywords:
-        if keyword.startswith("not ") and keyword in response_lower:
-            return 0
-    
-    # Then check positive keywords
-    for keyword in fake_keywords:
-        if not keyword.startswith("not ") and keyword in response_lower:
+    # Check for fake indicators
+    for pattern in fake_patterns:
+        if re.search(pattern, response_lower):
             return 1
     
-    for keyword in real_keywords:
-        if not keyword.startswith("not ") and keyword in response_lower:
+    # Check for real indicators
+    for pattern in real_patterns:
+        if re.search(pattern, response_lower):
             return 0
     
     return -1
@@ -74,7 +87,18 @@ def compute_metrics(
     predictions: List[int],
     labels: List[int],
     confidences: List[float] = None,
+    scores_are_proba: bool = False,
 ) -> Dict[str, float]:
+    """
+    Compute classification metrics.
+    
+    Args:
+        predictions: Binary predictions (0=real, 1=fake)
+        labels: Ground truth labels
+        confidences: Confidence/probability scores
+        scores_are_proba: If True, treat confidences as P(fake) directly for AUC.
+                          If False (legacy), transform based on predicted class.
+    """
     valid_mask = [p != -1 for p in predictions]
     
     filtered_preds = [p for p, v in zip(predictions, valid_mask) if v]
@@ -88,8 +112,10 @@ def compute_metrics(
             "f1": 0.0,
             "auc": 0.0,
             "valid_ratio": 0.0,
+            "auc_valid_ratio": 0.0,
         }
     
+    # Classification metrics on ALL valid predictions (pred != -1)
     metrics = {
         "accuracy": accuracy_score(filtered_labels, filtered_preds),
         "precision": precision_score(filtered_labels, filtered_preds, zero_division=0),
@@ -98,15 +124,30 @@ def compute_metrics(
         "valid_ratio": len(filtered_preds) / len(predictions),
     }
     
+    # AUC computed SEPARATELY on samples with valid (non-None) confidence scores
     if confidences:
-        filtered_conf = [c for c, v in zip(confidences, valid_mask) if v]
-        scores = [c if p == 1 else 1 - c for p, c in zip(filtered_preds, filtered_conf)]
+        # Filter to only samples with valid predictions AND non-None confidence
+        auc_mask = [v and (c is not None) for v, c in zip(valid_mask, confidences)]
+        auc_preds = [p for p, m in zip(predictions, auc_mask) if m]
+        auc_labels = [l for l, m in zip(labels, auc_mask) if m]
+        auc_scores = [c for c, m in zip(confidences, auc_mask) if m]
         
-        if len(set(filtered_labels)) > 1:
-            metrics["auc"] = roc_auc_score(filtered_labels, scores)
+        metrics["auc_valid_ratio"] = len(auc_scores) / len(predictions) if predictions else 0.0
+        
+        if auc_scores and len(set(auc_labels)) > 1:
+            if scores_are_proba:
+                # Use confidence directly as P(fake) for AUC
+                scores = auc_scores
+            else:
+                # Legacy: transform confidence based on predicted class
+                scores = [c if p == 1 else 1 - c for p, c in zip(auc_preds, auc_scores)]
+            
+            metrics["auc"] = roc_auc_score(auc_labels, scores)
         else:
             metrics["auc"] = 0.0
     else:
+        # No confidences - use predictions for AUC
+        metrics["auc_valid_ratio"] = metrics["valid_ratio"]
         if len(set(filtered_labels)) > 1:
             metrics["auc"] = roc_auc_score(filtered_labels, filtered_preds)
         else:
@@ -119,7 +160,19 @@ def compute_per_manipulation_metrics(
     predictions: List[int],
     labels: List[int],
     manipulation_types: List[str],
+    confidences: List[float] = None,
+    scores_are_proba: bool = False,
 ) -> Dict[str, Dict[str, float]]:
+    """
+    Compute metrics per manipulation type.
+    
+    Args:
+        predictions: Binary predictions
+        labels: Ground truth labels
+        manipulation_types: Type of manipulation for each sample
+        confidences: Confidence/probability scores (optional)
+        scores_are_proba: If True, confidences are P(fake) for AUC
+    """
     unique_types = set(manipulation_types)
     results = {}
     
@@ -129,8 +182,15 @@ def compute_per_manipulation_metrics(
         type_preds = [p for p, m in zip(predictions, mask) if m]
         type_labels = [l for l, m in zip(labels, mask) if m]
         
+        # Also filter confidences if provided
+        type_conf = None
+        if confidences is not None:
+            type_conf = [c for c, m in zip(confidences, mask) if m]
+        
         if type_preds:
-            results[manip_type] = compute_metrics(type_preds, type_labels)
+            results[manip_type] = compute_metrics(
+                type_preds, type_labels, type_conf, scores_are_proba
+            )
             results[manip_type]["count"] = len(type_preds)
     
     return results

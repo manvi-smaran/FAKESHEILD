@@ -137,20 +137,39 @@ class DeepfakeDataset:
         for idx in range(len(self)):
             yield self[idx]
     
-    def get_stratified_samples(self, n_per_class: int) -> List[Tuple[Image.Image, int, str]]:
-        real_samples = [s for s in self.samples if s[1] == 0]
-        fake_samples = [s for s in self.samples if s[1] == 1]
+    def get_stratified_samples(
+        self, n_per_class: int, return_indices: bool = False
+    ) -> List[Tuple[Image.Image, int, str]]:
+        """
+        Get stratified samples from the dataset.
+        
+        Args:
+            n_per_class: Number of samples per class
+            return_indices: If True, return (samples, indices) tuple
+            
+        Returns:
+            If return_indices=False: List of (image, label, manip_type) tuples
+            If return_indices=True: Tuple of (samples_list, indices_list)
+        """
+        # Track indices along with samples
+        real_indices = [i for i, s in enumerate(self.samples) if s[1] == 0]
+        fake_indices = [i for i, s in enumerate(self.samples) if s[1] == 1]
         
         random.seed(self.seed)
         
-        selected_real = random.sample(real_samples, min(n_per_class, len(real_samples)))
-        selected_fake = random.sample(fake_samples, min(n_per_class, len(fake_samples)))
+        selected_real_idx = random.sample(real_indices, min(n_per_class, len(real_indices)))
+        selected_fake_idx = random.sample(fake_indices, min(n_per_class, len(fake_indices)))
+        
+        selected_indices = selected_real_idx + selected_fake_idx
         
         result = []
-        for frame_path, label, manip_type in selected_real + selected_fake:
+        for idx in selected_indices:
+            frame_path, label, manip_type = self.samples[idx]
             image = Image.open(frame_path).convert("RGB")
             result.append((image, label, manip_type))
         
+        if return_indices:
+            return result, selected_indices
         return result
     
     def get_stats(self) -> Dict[str, int]:

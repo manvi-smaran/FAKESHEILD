@@ -99,12 +99,12 @@ class LoRATrainer:
         self,
         model_name: str = "HuggingFaceTB/SmolVLM-Instruct",
         output_dir: str = "checkpoints/smolvlm-lora",
-        lora_rank: int = 16,
-        lora_alpha: int = 32,
+        lora_rank: int = 8,  # Reduced for memory
+        lora_alpha: int = 16,
         learning_rate: float = 2e-4,
         num_epochs: int = 3,
-        batch_size: int = 2,
-        gradient_accumulation_steps: int = 8,
+        batch_size: int = 1,  # Reduced for memory
+        gradient_accumulation_steps: int = 16,  # Increased to compensate
     ):
         self.model_name = model_name
         self.output_dir = Path(output_dir)
@@ -158,6 +158,14 @@ class LoRATrainer:
         
         self.model = get_peft_model(self.model, lora_config)
         self.model.print_trainable_parameters()
+        
+        # Ensure model is in training mode
+        self.model.train()
+        
+        # Make sure LoRA parameters require gradient
+        for name, param in self.model.named_parameters():
+            if 'lora' in name.lower():
+                param.requires_grad = True
         
         print("LoRA setup complete!")
     
