@@ -1,0 +1,286 @@
+{
+  "model": "moondream",
+  "model_full_name": "MoonDream2",
+  "dataset": "faceforensics",
+  "evaluation_type": "json_few_shot",
+  "results_by_k": {
+    "k=4": {
+      "k": 4,
+      "metrics": {
+        "accuracy": 0.8214285714285714,
+        "precision": 0.8556149732620321,
+        "recall": 0.9523809523809523,
+        "f1": 0.9014084507042254,
+        "valid_ratio": 1.0,
+        "auc_valid_ratio": 1.0,
+        "auc": 0.49404761904761896,
+        "parse_success_ratio": 1.0,
+        "auc_valid_samples": 196
+      },
+      "per_manipulation": {
+        "NeuralTextures": {
+          "accuracy": 0.9130434782608695,
+          "precision": 1.0,
+          "recall": 0.9130434782608695,
+          "f1": 0.9545454545454546,
+          "valid_ratio": 1.0,
+          "auc_valid_ratio": 1.0,
+          "auc": 0.0,
+          "count": 23
+        },
+        "original": {
+          "accuracy": 0.03571428571428571,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "valid_ratio": 1.0,
+          "auc_valid_ratio": 1.0,
+          "auc": 0.0,
+          "count": 28
+        },
+        "Face2Face": {
+          "accuracy": 0.8787878787878788,
+          "precision": 1.0,
+          "recall": 0.8787878787878788,
+          "f1": 0.9354838709677419,
+          "valid_ratio": 1.0,
+          "auc_valid_ratio": 1.0,
+          "auc": 0.0,
+          "count": 33
+        },
+        "DeepFakeDetection": {
+          "accuracy": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "valid_ratio": 1.0,
+          "auc_valid_ratio": 1.0,
+          "auc": 0.0,
+          "count": 23
+        },
+        "Deepfakes": {
+          "accuracy": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "valid_ratio": 1.0,
+          "auc_valid_ratio": 1.0,
+          "auc": 0.0,
+          "count": 29
+        },
+        "FaceShifter": {
+          "accuracy": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "valid_ratio": 1.0,
+          "auc_valid_ratio": 1.0,
+          "auc": 0.0,
+          "count": 27
+        },
+        "FaceSwap": {
+          "accuracy": 0.9393939393939394,
+          "precision": 1.0,
+          "recall": 0.9393939393939394,
+          "f1": 0.96875,
+          "valid_ratio": 1.0,
+          "auc_valid_ratio": 1.0,
+          "auc": 0.0,
+          "count": 33
+        }
+      },
+      "num_samples": 196,
+      "sample_evidence": [
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "consistent facial boundaries",
+          "natural skin texture",
+          "coherent lighting"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ]
+      ]
+    },
+    "k=8": {
+      "k": 8,
+      "metrics": {
+        "accuracy": 0.8125,
+        "precision": 0.8571428571428571,
+        "recall": 0.9397590361445783,
+        "f1": 0.896551724137931,
+        "valid_ratio": 1.0,
+        "auc_valid_ratio": 1.0,
+        "auc": 0.46987951807228917,
+        "parse_success_ratio": 1.0,
+        "auc_valid_samples": 192
+      },
+      "per_manipulation": {
+        "NeuralTextures": {
+          "accuracy": 0.8636363636363636,
+          "precision": 1.0,
+          "recall": 0.8636363636363636,
+          "f1": 0.926829268292683,
+          "valid_ratio": 1.0,
+          "auc_valid_ratio": 1.0,
+          "auc": 0.0,
+          "count": 22
+        },
+        "original": {
+          "accuracy": 0.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "valid_ratio": 1.0,
+          "auc_valid_ratio": 1.0,
+          "auc": 0.0,
+          "count": 26
+        },
+        "Face2Face": {
+          "accuracy": 0.9090909090909091,
+          "precision": 1.0,
+          "recall": 0.9090909090909091,
+          "f1": 0.9523809523809523,
+          "valid_ratio": 1.0,
+          "auc_valid_ratio": 1.0,
+          "auc": 0.0,
+          "count": 33
+        },
+        "DeepFakeDetection": {
+          "accuracy": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "valid_ratio": 1.0,
+          "auc_valid_ratio": 1.0,
+          "auc": 0.0,
+          "count": 23
+        },
+        "Deepfakes": {
+          "accuracy": 0.9,
+          "precision": 1.0,
+          "recall": 0.9,
+          "f1": 0.9473684210526315,
+          "valid_ratio": 1.0,
+          "auc_valid_ratio": 1.0,
+          "auc": 0.0,
+          "count": 30
+        },
+        "FaceShifter": {
+          "accuracy": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "valid_ratio": 1.0,
+          "auc_valid_ratio": 1.0,
+          "auc": 0.0,
+          "count": 27
+        },
+        "FaceSwap": {
+          "accuracy": 0.967741935483871,
+          "precision": 1.0,
+          "recall": 0.967741935483871,
+          "f1": 0.9836065573770492,
+          "valid_ratio": 1.0,
+          "auc_valid_ratio": 1.0,
+          "auc": 0.0,
+          "count": 31
+        }
+      },
+      "num_samples": 192,
+      "sample_evidence": [
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ]
+      ]
+    }
+  }
+}

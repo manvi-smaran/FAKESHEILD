@@ -296,7 +296,11 @@ Based on these example patterns, analyze the image and output ONLY JSON:"""
                 "metrics": metrics,
                 "per_manipulation": per_manip_metrics,
                 "num_samples": len(predictions),
-                "sample_evidence": all_evidence[:10],  # Save sample evidence
+                "sample_evidence": all_evidence[:10],
+                # Save for distribution analysis (p_fake histogram)
+                "p_fake_values": [c if c is not None else 0.5 for c in confidences],
+                "ground_truth_labels": labels,
+                "p_fake_method": "self_reported_json",  # Track scoring method
             }
             
             print(format_results(metrics, model_config["name"], dataset_name, f"JSON Few-Shot (k={k})"))

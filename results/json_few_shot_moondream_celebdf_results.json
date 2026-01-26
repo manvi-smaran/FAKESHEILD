@@ -1,0 +1,186 @@
+{
+  "model": "moondream",
+  "model_full_name": "MoonDream2",
+  "dataset": "celebdf",
+  "evaluation_type": "json_few_shot",
+  "results_by_k": {
+    "k=4": {
+      "k": 4,
+      "metrics": {
+        "accuracy": 0.8418367346938775,
+        "precision": 0.859375,
+        "recall": 0.9763313609467456,
+        "f1": 0.9141274238227147,
+        "valid_ratio": 1.0,
+        "auc_valid_ratio": 1.0,
+        "auc": 0.4881656804733728,
+        "parse_success_ratio": 1.0,
+        "auc_valid_samples": 196
+      },
+      "per_manipulation": {
+        "deepfake": {
+          "accuracy": 0.9763313609467456,
+          "precision": 1.0,
+          "recall": 0.9763313609467456,
+          "f1": 0.9880239520958084,
+          "valid_ratio": 1.0,
+          "auc_valid_ratio": 1.0,
+          "auc": 0.0,
+          "count": 169
+        },
+        "real": {
+          "accuracy": 0.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "valid_ratio": 1.0,
+          "auc_valid_ratio": 1.0,
+          "auc": 0.0,
+          "count": 27
+        }
+      },
+      "num_samples": 196,
+      "sample_evidence": [
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ]
+      ]
+    },
+    "k=8": {
+      "k": 8,
+      "metrics": {
+        "accuracy": 0.8541666666666666,
+        "precision": 0.8677248677248677,
+        "recall": 0.9820359281437125,
+        "f1": 0.9213483146067416,
+        "valid_ratio": 1.0,
+        "auc_valid_ratio": 1.0,
+        "auc": 0.49101796407185627,
+        "parse_success_ratio": 1.0,
+        "auc_valid_samples": 192
+      },
+      "per_manipulation": {
+        "deepfake": {
+          "accuracy": 0.9820359281437125,
+          "precision": 1.0,
+          "recall": 0.9820359281437125,
+          "f1": 0.9909365558912386,
+          "valid_ratio": 1.0,
+          "auc_valid_ratio": 1.0,
+          "auc": 0.0,
+          "count": 167
+        },
+        "real": {
+          "accuracy": 0.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "valid_ratio": 1.0,
+          "auc_valid_ratio": 1.0,
+          "auc": 0.0,
+          "count": 25
+        }
+      },
+      "num_samples": 192,
+      "sample_evidence": [
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ],
+        [
+          "blending artifacts at jaw",
+          "inconsistent skin texture",
+          "unnatural eye reflections"
+        ]
+      ]
+    }
+  }
+}
