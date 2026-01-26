@@ -321,6 +321,109 @@ Based on these example patterns, analyze the image and output ONLY JSON:"""
         
         return results
     
+    def evaluate_model_forced_choice(
+        self,
+        model_name: str,
+        dataset_name: str,
+        max_samples: Optional[int] = None,
+        save_predictions: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Forced-choice evaluation using logit-based p_fake scoring.
+        
+        This eliminates template copying by deriving p_fake from model logits,
+        not self-reported text output.
+        """
+        model_config = self.config["models"][model_name]
+        model = get_model(model_name, model_config)
+        
+        print(f"Loading model: {model_config['name']}...")
+        model.load_model()
+        
+        dataset = create_dataset(self.config, dataset_name, max_samples)
+        print(f"Dataset loaded: {len(dataset)} samples")
+        
+        # Check if model has forced-choice method
+        if not hasattr(model, 'predict_with_forced_choice'):
+            print(f"WARNING: {model_name} doesn't have predict_with_forced_choice, falling back to JSON")
+            return self.evaluate_model_json(model_name, dataset_name, [4], max_samples)
+        
+        # Simple prompt for forced-choice (no few-shot needed for logit scoring)
+        base_prompt = """Analyze this image for signs of deepfake manipulation.
+
+Look for:
+- Facial inconsistencies (asymmetry, blur, artifacts)
+- Boundary artifacts around face edges
+- Temporal inconsistencies in video frames
+- Unnatural lighting or shadows
+- Texture anomalies on skin
+
+Is this image Real or Fake?"""
+        
+        predictions = []
+        p_fake_values = []
+        labels = []
+        manipulation_types = []
+        responses = []
+        
+        print(f"\n--- Forced-Choice Evaluation ---")
+        
+        for idx, (image, label, manip_type) in enumerate(tqdm(dataset, desc="Forced-Choice")):
+            try:
+                result = model.predict_with_forced_choice(image, base_prompt)
+                
+                pred = result.get("pred", int(result["p_fake"] >= 0.5))
+                p_fake = result["p_fake"]
+                response = result.get("response", "")
+                
+            except Exception as e:
+                print(f"Error on sample {idx}: {e}")
+                pred = -1
+                p_fake = None
+                response = f"error: {str(e)[:50]}"
+            
+            predictions.append(pred)
+            p_fake_values.append(p_fake)
+            labels.append(label)
+            manipulation_types.append(manip_type)
+            responses.append(response)
+        
+        # Compute metrics using the contract
+        from src.evaluation.metrics import compute_full_metrics_contract
+        
+        metrics = compute_metrics(
+            predictions, labels, p_fake_values, scores_are_proba=True
+        )
+        
+        # Also compute full deployment metrics with contract
+        contract_metrics = compute_full_metrics_contract(labels, p_fake_values)
+        
+        # Per-manipulation metrics
+        per_manip = compute_per_manipulation_metrics(
+            predictions, labels, manipulation_types, p_fake_values, scores_are_proba=True
+        )
+        
+        results = {
+            "model": model_config["name"],
+            "dataset": dataset_name,
+            "method": "forced_choice",
+            "n_samples": len(predictions),
+            "metrics": metrics,
+            "contract_metrics": contract_metrics,
+            "per_manipulation": per_manip,
+            "p_fake_values": p_fake_values,
+            "ground_truth_labels": labels,
+            "predictions": predictions,
+            "p_fake_method": "forced_choice_full_sequence",
+        }
+        
+        print(format_results(metrics, model_config["name"], dataset_name, "forced_choice"))
+        
+        if save_predictions:
+            self._save_results(results, dataset_name, f"forced_choice_{model_name}")
+        
+        return results
+    
     def evaluate_all_models(
         self,
         dataset_name: str,
@@ -371,6 +474,7 @@ def run_few_shot_evaluation(
     max_samples: Optional[int] = None,
     config_path: str = "configs/model_configs.yaml",
     use_json: bool = False,
+    use_forced_choice: bool = False,
 ):
     """
     Run few-shot evaluation.
@@ -382,10 +486,26 @@ def run_few_shot_evaluation(
         max_samples: Maximum samples to evaluate
         config_path: Path to config file
         use_json: If True, use JSON-based evaluation with structured output
+        use_forced_choice: If True, use logit-based forced-choice scoring (recommended)
     """
     evaluator = FewShotEvaluator(config_path=config_path)
     
-    if use_json:
+    if use_forced_choice:
+        # Forced-choice scoring (logit-based, no template copying)
+        if model_name:
+            return evaluator.evaluate_model_forced_choice(model_name, dataset_name, max_samples)
+        else:
+            import traceback
+            all_results = {}
+            for name in evaluator.config["models"].keys():
+                try:
+                    all_results[name] = evaluator.evaluate_model_forced_choice(name, dataset_name, max_samples)
+                except Exception as e:
+                    print(f"Error evaluating {name}: {e}")
+                    traceback.print_exc()
+                    all_results[name] = {"error": str(e)}
+            return all_results
+    elif use_json:
         if model_name:
             return evaluator.evaluate_model_json(model_name, dataset_name, k_values, max_samples)
         else:
@@ -405,4 +525,5 @@ def run_few_shot_evaluation(
             return evaluator.evaluate_model(model_name, dataset_name, k_values, max_samples)
         else:
             return evaluator.evaluate_all_models(dataset_name, k_values, max_samples)
+
 

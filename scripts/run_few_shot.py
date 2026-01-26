@@ -51,21 +51,33 @@ def main():
     parser.add_argument(
         "--json",
         action="store_true",
-        help="Use JSON-based prompts with structured output (recommended for publication).",
+        help="Use JSON-based prompts with structured output.",
+    )
+    
+    parser.add_argument(
+        "--forced_choice",
+        action="store_true",
+        help="Use forced-choice logit-based p_fake scoring (recommended, eliminates template copying).",
     )
     
     args = parser.parse_args()
     
-    eval_type = "JSON Few-Shot" if args.json else "Few-Shot"
+    if args.forced_choice:
+        eval_type = "Forced-Choice"
+    elif args.json:
+        eval_type = "JSON Few-Shot"
+    else:
+        eval_type = "Few-Shot"
     
     print(f"\n{'='*60}")
     print(f"VSLM {eval_type} Deepfake Detection Evaluation")
     print(f"{'='*60}")
-    print(f"Model:       {args.model or 'ALL'}")
-    print(f"Dataset:     {args.dataset}")
-    print(f"K values:    {args.k}")
-    print(f"Max Samples: {args.max_samples or 'ALL'}")
-    print(f"JSON Mode:   {args.json}")
+    print(f"Model:         {args.model or 'ALL'}")
+    print(f"Dataset:       {args.dataset}")
+    print(f"K values:      {args.k}")
+    print(f"Max Samples:   {args.max_samples or 'ALL'}")
+    print(f"Forced-Choice: {args.forced_choice}")
+    print(f"JSON Mode:     {args.json}")
     print(f"{'='*60}\n")
     
     # Use unified function with use_json parameter
@@ -76,6 +88,7 @@ def main():
         max_samples=args.max_samples,
         config_path=args.config,
         use_json=args.json,
+        use_forced_choice=args.forced_choice,
     )
     
     return results
@@ -83,4 +96,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
