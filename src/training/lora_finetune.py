@@ -396,30 +396,157 @@ Answer with 'Real' or 'Fake'."""
         return metrics
 
 
+# =============================================================================
+# Model-Specific Configurations for LoRA
+# =============================================================================
+
+MODEL_CONFIGS = {
+    "smolvlm": {
+        "model_name": "HuggingFaceTB/SmolVLM-Instruct",
+        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        "processor_class": "AutoProcessor",
+        "model_class": "AutoModelForVision2Seq",
+    },
+    "qwen_vl": {
+        "model_name": "Qwen/Qwen2-VL-2B-Instruct",
+        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        "processor_class": "AutoProcessor",
+        "model_class": "Qwen2VLForConditionalGeneration",
+    },
+    "moondream": {
+        "model_name": "vikhyatk/moondream2",
+        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "fc1", "fc2"],
+        "processor_class": "AutoProcessor",
+        "model_class": "AutoModelForCausalLM",
+    },
+}
+
+
+class MultiModelLoRATrainer(LoRATrainer):
+    """Extended LoRA trainer supporting multiple VLM architectures."""
+    
+    def __init__(
+        self,
+        model_type: str = "smolvlm",
+        output_dir: str = None,
+        lora_rank: int = 8,
+        lora_alpha: int = 16,
+        learning_rate: float = 2e-4,
+        num_epochs: int = 3,
+        batch_size: int = 1,
+        gradient_accumulation_steps: int = 16,
+    ):
+        if model_type not in MODEL_CONFIGS:
+            raise ValueError(f"Unknown model type: {model_type}. Choose from {list(MODEL_CONFIGS.keys())}")
+        
+        self.model_type = model_type
+        self.model_config = MODEL_CONFIGS[model_type]
+        
+        output_dir = output_dir or f"checkpoints/{model_type}-lora"
+        
+        super().__init__(
+            model_name=self.model_config["model_name"],
+            output_dir=output_dir,
+            lora_rank=lora_rank,
+            lora_alpha=lora_alpha,
+            learning_rate=learning_rate,
+            num_epochs=num_epochs,
+            batch_size=batch_size,
+            gradient_accumulation_steps=gradient_accumulation_steps,
+        )
+    
+    def setup(self):
+        """Load model and apply LoRA with model-specific config."""
+        from transformers import AutoProcessor, AutoModelForVision2Seq, AutoModelForCausalLM
+        from peft import LoraConfig, get_peft_model, TaskType
+        
+        print(f"Loading {self.model_type} processor...")
+        self.processor = AutoProcessor.from_pretrained(
+            self.model_name,
+            trust_remote_code=True,
+        )
+        
+        print(f"Loading {self.model_type} model...")
+        
+        # Model-specific loading
+        if self.model_type == "qwen_vl":
+            from transformers import Qwen2VLForConditionalGeneration
+            self.model = Qwen2VLForConditionalGeneration.from_pretrained(
+                self.model_name,
+                torch_dtype=torch.float16,
+                device_map="auto",
+                trust_remote_code=True,
+            )
+        elif self.model_type == "moondream":
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.model_name,
+                torch_dtype=torch.float16,
+                device_map="auto",
+                trust_remote_code=True,
+            )
+        else:
+            self.model = AutoModelForVision2Seq.from_pretrained(
+                self.model_name,
+                torch_dtype=torch.float16,
+                device_map="auto",
+                trust_remote_code=True,
+            )
+        
+        # Configure LoRA with model-specific target modules
+        print(f"Applying LoRA configuration for {self.model_type}...")
+        lora_config = LoraConfig(
+            r=self.lora_rank,
+            lora_alpha=self.lora_alpha,
+            target_modules=self.model_config["target_modules"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type=TaskType.CAUSAL_LM,
+        )
+        
+        self.model = get_peft_model(self.model, lora_config)
+        self.model.print_trainable_parameters()
+        
+        self.model.train()
+        
+        for name, param in self.model.named_parameters():
+            if 'lora' in name.lower():
+                param.requires_grad = True
+        
+        print(f"LoRA setup complete for {self.model_type}!")
+
+
 def run_lora_finetuning(
     config_path: str = "configs/model_configs.yaml",
     dataset_name: str = "celebdf",
-    output_dir: str = "checkpoints/smolvlm-lora",
+    output_dir: str = None,
     max_samples: Optional[int] = None,
     num_epochs: int = 3,
     learning_rate: float = 2e-4,
     lora_rank: int = 16,
+    model_type: str = "smolvlm",
 ):
-    """Main function to run LoRA fine-tuning."""
-    trainer = LoRATrainer(
+    """
+    Main function to run LoRA fine-tuning.
+    
+    Args:
+        model_type: One of 'smolvlm', 'qwen_vl', 'moondream'
+    """
+    output_dir = output_dir or f"checkpoints/{model_type}-lora"
+    
+    trainer = MultiModelLoRATrainer(
+        model_type=model_type,
         output_dir=output_dir,
         lora_rank=lora_rank,
         learning_rate=learning_rate,
         num_epochs=num_epochs,
     )
     
-    # Set config path and dataset
     trainer.config_path = config_path
     trainer.dataset_name = dataset_name
     
     trainer.train(max_samples=max_samples)
     
-    # Evaluate
     metrics = trainer.evaluate()
     
     return trainer, metrics
+

@@ -67,11 +67,24 @@ def main():
         help="LoRA rank (higher = more parameters)",
     )
     
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="smolvlm",
+        choices=["smolvlm", "qwen_vl", "moondream"],
+        help="Model to fine-tune (smolvlm, qwen_vl, moondream)",
+    )
+    
     args = parser.parse_args()
     
+    # Set default output dir based on model if not specified
+    if args.output_dir == "checkpoints/smolvlm-lora":
+        args.output_dir = f"checkpoints/{args.model}-lora"
+    
     print("\n" + "="*60)
-    print("SmolVLM LoRA Fine-Tuning for Deepfake Detection")
+    print(f"{args.model.upper()} LoRA Fine-Tuning for Deepfake Detection")
     print("="*60)
+    print(f"Model: {args.model}")
     print(f"Config: {args.config}")
     print(f"Dataset: {args.dataset}")
     print(f"Output Directory: {args.output_dir}")
@@ -90,6 +103,7 @@ def main():
         num_epochs=args.epochs,
         learning_rate=args.learning_rate,
         lora_rank=args.lora_rank,
+        model_type=args.model,
     )
     
     print("\n" + "="*60)
@@ -104,3 +118,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
