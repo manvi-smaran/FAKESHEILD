@@ -189,6 +189,10 @@ class PEFTTrainer:
         self.config_path = "configs/model_configs.yaml"
         self.dataset_name = "celebdf"
         
+        # Datasets (cached after first creation)
+        self._train_dataset = None
+        self._val_dataset = None
+        
         print(f"Initialized PEFTTrainer:")
         print(f"  Model: {self.model_type} ({self.model_config['model_name']})")
         print(f"  PEFT Method: {get_method_info(peft_method)}")
@@ -266,9 +270,14 @@ class PEFTTrainer:
         
         print(f"{self.peft_info.name} setup complete! ({trainable_count} trainable parameter groups)")
     
-    def create_dataloaders(self, max_samples: Optional[int] = None):
-        """Create train and validation dataloaders."""
-        train_dataset = DeepfakeFineTuneDataset(
+    def create_dataloaders(self, max_samples: Optional[int] = None, force_reload: bool = False):
+        """Create train and validation dataloaders (cached to ensure consistency)."""
+        # Use cached datasets if available (ensures train/val consistency)
+        if self._train_dataset is not None and self._val_dataset is not None and not force_reload:
+            print(f"Using cached datasets - Train: {len(self._train_dataset)}, Val: {len(self._val_dataset)}")
+            return self._train_dataset, self._val_dataset
+        
+        self._train_dataset = DeepfakeFineTuneDataset(
             config_path=self.config_path,
             dataset_name=self.dataset_name,
             processor=self.processor,
@@ -276,7 +285,7 @@ class PEFTTrainer:
             max_samples=max_samples,
         )
         
-        val_dataset = DeepfakeFineTuneDataset(
+        self._val_dataset = DeepfakeFineTuneDataset(
             config_path=self.config_path,
             dataset_name=self.dataset_name,
             processor=self.processor,
@@ -284,10 +293,10 @@ class PEFTTrainer:
             max_samples=max_samples,
         )
         
-        print(f"Train samples: {len(train_dataset)}")
-        print(f"Val samples: {len(val_dataset)}")
+        print(f"Train samples: {len(self._train_dataset)}")
+        print(f"Val samples: {len(self._val_dataset)}")
         
-        return train_dataset, val_dataset
+        return self._train_dataset, self._val_dataset
     
     def train(self, max_samples: Optional[int] = None):
         """Run PEFT fine-tuning."""
@@ -452,22 +461,26 @@ class PEFTTrainer:
         
         return training_info
     
-    def evaluate(self, max_samples: int = 100):
-        """Evaluate the fine-tuned model."""
+    def evaluate(self, max_samples: int = None):
+        """Evaluate the fine-tuned model using the same val dataset from training."""
         if self.model is None:
             raise ValueError("Model not loaded. Call setup() first.")
         
         self.model.eval()
         
-        _, val_dataset = self.create_dataloaders(max_samples)
+        # Reuse cached datasets (don't reload with different max_samples)
+        _, val_dataset = self.create_dataloaders()
         
         correct = 0
         total = 0
         
-        print(f"\nEvaluating {self.peft_info.name} model on {len(val_dataset)} samples...")
+        # Limit evaluation samples if specified
+        eval_samples = len(val_dataset) if max_samples is None else min(len(val_dataset), max_samples)
+        
+        print(f"\nEvaluating {self.peft_info.name} model on {eval_samples} samples...")
         
         with torch.no_grad():
-            for i in tqdm(range(min(len(val_dataset), max_samples))):
+            for i in tqdm(range(eval_samples)):
                 sample = val_dataset[i]
                 image = sample["image"]
                 label = sample["label"]
@@ -535,6 +548,8 @@ def run_peft_finetuning(
     num_epochs: int = 3,
     learning_rate: float = 2e-4,
     lora_rank: int = 16,
+    lora_alpha: int = 32,
+    batch_size: int = 1,
     model_type: str = "smolvlm",
     peft_method: str = "lora",
     **peft_kwargs,
@@ -553,8 +568,10 @@ def run_peft_finetuning(
         peft_method=peft_method,
         output_dir=output_dir,
         lora_rank=lora_rank,
+        lora_alpha=lora_alpha,
         learning_rate=learning_rate,
         num_epochs=num_epochs,
+        batch_size=batch_size,
         **peft_kwargs,
     )
     

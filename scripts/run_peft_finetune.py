@@ -198,6 +198,8 @@ PEFT Methods Available:
         num_epochs=args.epochs,
         learning_rate=args.learning_rate,
         lora_rank=args.lora_rank,
+        lora_alpha=args.lora_alpha,
+        batch_size=args.batch_size,
         model_type=args.model,
         peft_method=args.peft_method,
         **peft_kwargs,
