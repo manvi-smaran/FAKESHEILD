@@ -316,28 +316,12 @@ class PEFTTrainer:
                     tokenize=False,
                 )
                 
-                # Process inputs - handle truncation gracefully
-                try:
-                    inputs = self.processor(
-                        text=text,
-                        images=[image],
-                        return_tensors="pt",
-                        padding=True,
-                        truncation=True,
-                        max_length=512,
-                    )
-                except TypeError:
-                    # Some processors don't support truncation argument
-                    inputs = self.processor(
-                        text=text,
-                        images=[image],
-                        return_tensors="pt",
-                        padding=True,
-                    )
-                    # Manually truncate if needed
-                    if inputs["input_ids"].shape[-1] > 512:
-                        inputs["input_ids"] = inputs["input_ids"][:, :512]
-                        inputs["attention_mask"] = inputs["attention_mask"][:, :512]
+                # Process inputs - VLMs don't support truncation (breaks image token alignment)
+                inputs = self.processor(
+                    text=text,
+                    images=[image],
+                    return_tensors="pt",
+                )
                 
                 all_input_ids.append(inputs["input_ids"].squeeze(0))
                 all_attention_mask.append(inputs["attention_mask"].squeeze(0))
