@@ -125,15 +125,11 @@ MODEL_CONFIGS = {
     "qwen_vl": {
         "model_name": "Qwen/Qwen2-VL-2B-Instruct",
         "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-        "processor_class": "AutoProcessor",
+        "processor_class": "AutoProcessor", 
         "model_class": "Qwen2VLForConditionalGeneration",
     },
-    "moondream": {
-        "model_name": "vikhyatk/moondream2",
-        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "fc1", "fc2"],
-        "processor_class": "AutoProcessor",
-        "model_class": "AutoModelForCausalLM",
-    },
+    # NOTE: Moondream uses a custom API (encode_image/answer_question) that's
+    # incompatible with standard PEFT training. It can still be used for inference.
 }
 
 
@@ -319,33 +315,19 @@ class PEFTTrainer:
             all_image_grid_thw = []  # For Qwen2-VL
             
             for image, messages in zip(images, messages_list):
-                # Model-specific text preparation
-                if self.model_type == "moondream":
-                    # Moondream doesn't have chat template - use simple format
-                    user_text = messages[0]["content"][1]["text"]
-                    assistant_text = messages[1]["content"][0]["text"]
-                    text = f"<image>\n\nQuestion: {user_text}\n\nAnswer: {assistant_text}"
-                    
-                    # Moondream uses different processing
-                    inputs = self.processor(
-                        images=image,
-                        text=text,
-                        return_tensors="pt",
-                    )
-                else:
-                    # SmolVLM, Qwen2-VL use chat template
-                    text = self.processor.apply_chat_template(
-                        messages,
-                        add_generation_prompt=False,
-                        tokenize=False,
-                    )
-                    
-                    # Process inputs
-                    inputs = self.processor(
-                        text=text,
-                        images=[image],
-                        return_tensors="pt",
-                    )
+                # SmolVLM, Qwen2-VL use chat template
+                text = self.processor.apply_chat_template(
+                    messages,
+                    add_generation_prompt=False,
+                    tokenize=False,
+                )
+                
+                # Process inputs
+                inputs = self.processor(
+                    text=text,
+                    images=[image],
+                    return_tensors="pt",
+                )
                 
                 all_input_ids.append(inputs["input_ids"].squeeze(0))
                 all_attention_mask.append(inputs["attention_mask"].squeeze(0))
@@ -510,40 +492,31 @@ class PEFTTrainer:
                 label = sample["label"]
                 
                 # Model-specific text preparation for inference
-                if self.model_type == "moondream":
-                    # Moondream doesn't have chat template
-                    text = f"<image>\n\nQuestion: {val_dataset.prompt}\n\nAnswer:"
-                    inputs = self.processor(
-                        images=image,
-                        text=text,
-                        return_tensors="pt",
-                    ).to(self.model.device)
-                else:
-                    # SmolVLM, Qwen2-VL use chat template
-                    messages = [
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "image"},
-                                {"type": "text", "text": val_dataset.prompt}
-                            ]
-                        }
-                    ]
-                    
-                    text = self.processor.apply_chat_template(
-                        messages,
-                        add_generation_prompt=True,
-                        tokenize=False,
-                    )
-                    
-                    inputs = self.processor(
-                        text=text,
-                        images=[image],
-                        return_tensors="pt",
-                    )
-                    
-                    # Move to device
-                    inputs = {k: v.to(self.model.device) if hasattr(v, 'to') else v for k, v in inputs.items()}
+                # SmolVLM, Qwen2-VL use chat template
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image"},
+                            {"type": "text", "text": val_dataset.prompt}
+                        ]
+                    }
+                ]
+                
+                text = self.processor.apply_chat_template(
+                    messages,
+                    add_generation_prompt=True,
+                    tokenize=False,
+                )
+                
+                inputs = self.processor(
+                    text=text,
+                    images=[image],
+                    return_tensors="pt",
+                )
+                
+                # Move to device
+                inputs = {k: v.to(self.model.device) if hasattr(v, 'to') else v for k, v in inputs.items()}
                 
                 outputs = self.model.generate(
                     **inputs,

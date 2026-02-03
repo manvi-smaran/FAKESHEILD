@@ -50,8 +50,8 @@ PEFT Methods Available:
         "--model",
         type=str,
         default="smolvlm",
-        choices=["smolvlm", "qwen_vl", "moondream"],
-        help="VLM model to fine-tune",
+        choices=["smolvlm", "qwen_vl"],
+        help="VLM model to fine-tune (moondream not supported - uses custom API)",
     )
     
     # PEFT method selection
