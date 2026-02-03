@@ -305,37 +305,57 @@ class PEFTTrainer:
         
         train_dataset, val_dataset = self.create_dataloaders(max_samples)
         
-        # Collate function for batching
+        # Collate function for batching - model-specific processing
         def collate_fn(examples):
             images = [ex["image"] for ex in examples]
             messages_list = [ex["messages"] for ex in examples]
-            labels = [ex["label"] for ex in examples]
+            labels_list = [ex["label"] for ex in examples]
             
             # Process each example
             all_input_ids = []
             all_attention_mask = []
             all_pixel_values = []
             all_labels = []
+            all_image_grid_thw = []  # For Qwen2-VL
             
             for image, messages in zip(images, messages_list):
-                # Apply chat template
-                text = self.processor.apply_chat_template(
-                    messages,
-                    add_generation_prompt=False,
-                    tokenize=False,
-                )
-                
-                # Process inputs - VLMs don't support truncation (breaks image token alignment)
-                inputs = self.processor(
-                    text=text,
-                    images=[image],
-                    return_tensors="pt",
-                )
+                # Model-specific text preparation
+                if self.model_type == "moondream":
+                    # Moondream doesn't have chat template - use simple format
+                    user_text = messages[0]["content"][1]["text"]
+                    assistant_text = messages[1]["content"][0]["text"]
+                    text = f"<image>\n\nQuestion: {user_text}\n\nAnswer: {assistant_text}"
+                    
+                    # Moondream uses different processing
+                    inputs = self.processor(
+                        images=image,
+                        text=text,
+                        return_tensors="pt",
+                    )
+                else:
+                    # SmolVLM, Qwen2-VL use chat template
+                    text = self.processor.apply_chat_template(
+                        messages,
+                        add_generation_prompt=False,
+                        tokenize=False,
+                    )
+                    
+                    # Process inputs
+                    inputs = self.processor(
+                        text=text,
+                        images=[image],
+                        return_tensors="pt",
+                    )
                 
                 all_input_ids.append(inputs["input_ids"].squeeze(0))
                 all_attention_mask.append(inputs["attention_mask"].squeeze(0))
+                
                 if "pixel_values" in inputs:
                     all_pixel_values.append(inputs["pixel_values"].squeeze(0))
+                
+                # Qwen2-VL specific: image_grid_thw
+                if "image_grid_thw" in inputs:
+                    all_image_grid_thw.append(inputs["image_grid_thw"].squeeze(0))
                 
                 # Create labels (same as input_ids for causal LM)
                 label_ids = inputs["input_ids"].squeeze(0).clone()
@@ -370,6 +390,10 @@ class PEFTTrainer:
             
             if all_pixel_values:
                 batch["pixel_values"] = torch.stack(all_pixel_values)
+            
+            # Qwen2-VL specific: add image_grid_thw
+            if all_image_grid_thw:
+                batch["image_grid_thw"] = torch.stack(all_image_grid_thw)
             
             return batch
         
@@ -485,28 +509,41 @@ class PEFTTrainer:
                 image = sample["image"]
                 label = sample["label"]
                 
-                # Create inference message
-                messages = [
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "image"},
-                            {"type": "text", "text": val_dataset.prompt}
-                        ]
-                    }
-                ]
-                
-                text = self.processor.apply_chat_template(
-                    messages,
-                    add_generation_prompt=True,
-                    tokenize=False,
-                )
-                
-                inputs = self.processor(
-                    text=text,
-                    images=[image],
-                    return_tensors="pt",
-                ).to(self.model.device)
+                # Model-specific text preparation for inference
+                if self.model_type == "moondream":
+                    # Moondream doesn't have chat template
+                    text = f"<image>\n\nQuestion: {val_dataset.prompt}\n\nAnswer:"
+                    inputs = self.processor(
+                        images=image,
+                        text=text,
+                        return_tensors="pt",
+                    ).to(self.model.device)
+                else:
+                    # SmolVLM, Qwen2-VL use chat template
+                    messages = [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "image"},
+                                {"type": "text", "text": val_dataset.prompt}
+                            ]
+                        }
+                    ]
+                    
+                    text = self.processor.apply_chat_template(
+                        messages,
+                        add_generation_prompt=True,
+                        tokenize=False,
+                    )
+                    
+                    inputs = self.processor(
+                        text=text,
+                        images=[image],
+                        return_tensors="pt",
+                    )
+                    
+                    # Move to device
+                    inputs = {k: v.to(self.model.device) if hasattr(v, 'to') else v for k, v in inputs.items()}
                 
                 outputs = self.model.generate(
                     **inputs,
