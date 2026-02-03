@@ -56,16 +56,30 @@ class DeepfakeFineTuneDataset(Dataset):
         # Get all samples
         all_samples = full_dataset.samples
         
-        # Shuffle with seed
+        # BALANCE THE DATASET: separate by class
+        real_samples = [s for s in all_samples if s[1] == 0]  # label=0 is Real
+        fake_samples = [s for s in all_samples if s[1] == 1]  # label=1 is Fake
+        
+        # Shuffle each class
         random.seed(42)
-        random.shuffle(all_samples)
+        random.shuffle(real_samples)
+        random.shuffle(fake_samples)
+        
+        # Take equal number from each class (balanced sampling)
+        min_class_size = min(len(real_samples), len(fake_samples))
+        balanced_samples = real_samples[:min_class_size] + fake_samples[:min_class_size]
+        
+        # Shuffle the combined balanced dataset
+        random.shuffle(balanced_samples)
+        
+        print(f"[Dataset] Balanced: {min_class_size} Real + {min_class_size} Fake = {len(balanced_samples)} total")
         
         # Split train/val (80/20)
-        split_idx = int(len(all_samples) * 0.8)
+        split_idx = int(len(balanced_samples) * 0.8)
         if self.split == "train":
-            self.samples = all_samples[:split_idx]
+            self.samples = balanced_samples[:split_idx]
         else:
-            self.samples = all_samples[split_idx:]
+            self.samples = balanced_samples[split_idx:]
         
         # Prompt template for training
         self.prompt = """Analyze this image of a human face carefully.
