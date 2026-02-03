@@ -551,7 +551,15 @@ class PEFTTrainer:
                     do_sample=False,
                 )
                 
-                response = self.processor.decode(outputs[0], skip_special_tokens=True)
+                # Parse prediction - only look at the NEW generated text
+                # Get the input length to extract only generated tokens
+                input_len = inputs["input_ids"].shape[1]
+                generated_tokens = outputs[0][input_len:]
+                response = self.processor.decode(generated_tokens, skip_special_tokens=True)
+                
+                # Debug: show first 3 predictions
+                if i < 3:
+                    print(f"\n[DEBUG] Sample {i}: Label={label}, Generated='{response[:100]}...'")
                 
                 # Parse prediction
                 response_lower = response.lower()
@@ -561,14 +569,22 @@ class PEFTTrainer:
                     pred = 0
                 else:
                     pred = -1
+                    if i < 3:
+                        print(f"[DEBUG] Sample {i}: UNPARSEABLE - pred=-1")
                 
                 if pred == label:
                     correct += 1
                 total += 1
         
         accuracy = correct / total if total > 0 else 0
+        
         print(f"\nEvaluation Results:")
         print(f"  Accuracy: {accuracy:.2%} ({correct}/{total})")
+        
+        # Debug: Print label distribution
+        fake_count = sum(1 for i in range(min(eval_samples, len(val_dataset))) if val_dataset[i]["label"] == 1)
+        real_count = eval_samples - fake_count
+        print(f"  Label distribution - Real: {real_count}, Fake: {fake_count}")
         
         return {"accuracy": accuracy, "correct": correct, "total": total}
 
