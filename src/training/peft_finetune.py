@@ -261,11 +261,12 @@ class PEFTTrainer:
         # Print examples of each label to verify mapping
         shown0, shown1 = 0, 0
         for (path, lab, manip) in all_samples[:2000]:
+            path_str = str(path)
             if lab == 0 and shown0 < 2:
-                print(f"[DATA] label=0 example: {path[-50:]} manip={manip}")
+                print(f"[DATA] label=0 example: {path_str[-50:]} manip={manip}")
                 shown0 += 1
             if lab == 1 and shown1 < 2:
-                print(f"[DATA] label=1 example: {path[-50:]} manip={manip}")
+                print(f"[DATA] label=1 example: {path_str[-50:]} manip={manip}")
                 shown1 += 1
             if shown0 >= 2 and shown1 >= 2:
                 break
