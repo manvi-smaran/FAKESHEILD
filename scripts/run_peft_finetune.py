@@ -103,22 +103,22 @@ PEFT Methods Available:
     parser.add_argument(
         "--learning_rate",
         type=float,
-        default=2e-4,
-        help="Learning rate",
+        default=5e-5,
+        help="Learning rate (5e-5 recommended for VLM LoRA)",
     )
     
     parser.add_argument(
         "--lora_rank",
         type=int,
-        default=16,
-        help="LoRA rank (r parameter)",
+        default=8,
+        help="LoRA rank (start with 8, increase if needed)",
     )
     
     parser.add_argument(
         "--lora_alpha",
         type=int,
-        default=32,
-        help="LoRA alpha scaling factor",
+        default=16,
+        help="LoRA alpha scaling factor (usually 2x rank)",
     )
     
     # Output

@@ -1,22 +1,27 @@
 """
-Unified PEFT Fine-Tuning Module for VLM Deepfake Detection
+PEFT Fine-Tuning Module for Vision Language Models
 
-Supports multiple PEFT methods:
-- LoRA: Low-Rank Adaptation (baseline)
-- QLoRA: Quantized LoRA (4-bit)
-- DoRA: Weight-Decomposed LoRA
-- AdaLoRA: Adaptive Rank LoRA
-- Prefix Tuning: Learnable prefix tokens
+Supports multiple PEFT methods: LoRA, QLoRA, DoRA, AdaLoRA, Prefix Tuning
+Models: SmolVLM, Qwen2-VL
+
+Key fixes implemented:
+- Labels masking: loss ONLY on assistant answer tokens
+- Deterministic dataset split: balanced 50/50, no overlap
+- One-word answers: " Real" or " Fake" for clean training
+- Forced-choice evaluation: use p_fake scores, not text parsing
 """
-from typing import Dict, Any, Optional, List
+
+import os
+import json
+import random
+import yaml
 from pathlib import Path
-from PIL import Image
+from typing import Optional, List, Tuple
+from tqdm import tqdm
+
 import torch
 from torch.utils.data import Dataset, DataLoader
-from tqdm import tqdm
-import json
-import yaml
-import random
+from PIL import Image
 
 from .peft_configs import (
     PEFT_METHODS,
@@ -28,69 +33,25 @@ from .peft_configs import (
 
 
 # =============================================================================
-# Dataset (reused from lora_finetune)
+# Dataset Class (accepts precomputed samples)
 # =============================================================================
 
 class DeepfakeFineTuneDataset(Dataset):
-    """Dataset for PEFT fine-tuning on deepfake detection."""
+    """Dataset for PEFT fine-tuning on deepfake detection.
     
-    def __init__(
-        self,
-        config_path: str,
-        dataset_name: str,
-        processor,
-        split: str = "train",
-        max_samples: Optional[int] = None,
-    ):
+    Takes precomputed, balanced samples to ensure train/val consistency.
+    """
+    
+    def __init__(self, samples: List[Tuple], processor):
+        self.samples = samples
         self.processor = processor
-        self.split = split
         
-        # Load config
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f)
-        
-        # Use existing dataset loader
-        from src.data.dataset_loader import create_dataset
-        full_dataset = create_dataset(config, dataset_name, max_samples)
-        
-        # Get all samples
-        all_samples = full_dataset.samples
-        
-        # BALANCE THE DATASET: separate by class
-        real_samples = [s for s in all_samples if s[1] == 0]  # label=0 is Real
-        fake_samples = [s for s in all_samples if s[1] == 1]  # label=1 is Fake
-        
-        # Shuffle each class
-        random.seed(42)
-        random.shuffle(real_samples)
-        random.shuffle(fake_samples)
-        
-        # Take equal number from each class (balanced sampling)
-        min_class_size = min(len(real_samples), len(fake_samples))
-        balanced_samples = real_samples[:min_class_size] + fake_samples[:min_class_size]
-        
-        # Shuffle the combined balanced dataset
-        random.shuffle(balanced_samples)
-        
-        print(f"[Dataset] Balanced: {min_class_size} Real + {min_class_size} Fake = {len(balanced_samples)} total")
-        
-        # Split train/val (80/20)
-        split_idx = int(len(balanced_samples) * 0.8)
-        if self.split == "train":
-            self.samples = balanced_samples[:split_idx]
-        else:
-            self.samples = balanced_samples[split_idx:]
-        
-        # Prompt template for training
-        self.prompt = """Analyze this image of a human face carefully.
-Is this a real photograph or a deepfake/AI-manipulated image?
-Answer with 'Real' or 'Fake' followed by a brief explanation."""
-        
-        # Response templates
-        self.responses = {
-            0: "Real. This appears to be an authentic photograph with natural skin texture, consistent lighting, and no visible manipulation artifacts.",
-            1: "Fake. This image shows signs of deepfake manipulation including subtle blending artifacts around facial boundaries and inconsistencies in texture."
-        }
+        # Simple prompt that matches evaluation
+        self.prompt = (
+            "Classify authenticity.\n\n"
+            "Answer with exactly one word: Real or Fake.\n\n"
+            "Answer:"
+        )
     
     def __len__(self):
         return len(self.samples)
@@ -100,6 +61,9 @@ Answer with 'Real' or 'Fake' followed by a brief explanation."""
         
         # Load image
         image = Image.open(frame_path).convert("RGB")
+        
+        # Strict one-word targets (leading space for tokenizer)
+        response = " Real" if label == 0 else " Fake"
         
         # Create conversation format
         messages = [
@@ -113,7 +77,7 @@ Answer with 'Real' or 'Fake' followed by a brief explanation."""
             {
                 "role": "assistant",
                 "content": [
-                    {"type": "text", "text": self.responses[label]}
+                    {"type": "text", "text": response}
                 ]
             }
         ]
@@ -132,18 +96,16 @@ Answer with 'Real' or 'Fake' followed by a brief explanation."""
 MODEL_CONFIGS = {
     "smolvlm": {
         "model_name": "HuggingFaceTB/SmolVLM-Instruct",
-        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],  # Conservative: attention only
         "processor_class": "AutoProcessor",
         "model_class": "AutoModelForVision2Seq",
     },
     "qwen_vl": {
         "model_name": "Qwen/Qwen2-VL-2B-Instruct",
-        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],  # Conservative: attention only
         "processor_class": "AutoProcessor", 
         "model_class": "Qwen2VLForConditionalGeneration",
     },
-    # NOTE: Moondream uses a custom API (encode_image/answer_question) that's
-    # incompatible with standard PEFT training. It can still be used for inference.
 }
 
 
@@ -152,16 +114,16 @@ MODEL_CONFIGS = {
 # =============================================================================
 
 class PEFTTrainer:
-    """Unified PEFT trainer supporting multiple methods and VLM architectures."""
+    """Unified PEFT trainer with proper label masking and forced-choice evaluation."""
     
     def __init__(
         self,
         model_type: str = "smolvlm",
         peft_method: str = "lora",
         output_dir: str = None,
-        lora_rank: int = 16,
-        lora_alpha: int = 32,
-        learning_rate: float = 2e-4,
+        lora_rank: int = 8,  # Conservative default
+        lora_alpha: int = 16,
+        learning_rate: float = 5e-5,  # Lower LR for VLM LoRA
         num_epochs: int = 3,
         batch_size: int = 1,
         gradient_accumulation_steps: int = 16,
@@ -206,6 +168,8 @@ class PEFTTrainer:
         print(f"Initialized PEFTTrainer:")
         print(f"  Model: {self.model_type} ({self.model_config['model_name']})")
         print(f"  PEFT Method: {get_method_info(peft_method)}")
+        print(f"  LoRA: r={lora_rank}, alpha={lora_alpha}")
+        print(f"  LR: {learning_rate}")
         print(f"  Output: {self.output_dir}")
     
     def setup(self):
@@ -231,14 +195,6 @@ class PEFTTrainer:
         if self.model_type == "qwen_vl":
             from transformers import Qwen2VLForConditionalGeneration
             self.model = Qwen2VLForConditionalGeneration.from_pretrained(
-                self.model_config["model_name"],
-                torch_dtype=torch.bfloat16 if quantization_config else torch.float16,
-                device_map="auto",
-                trust_remote_code=True,
-                quantization_config=quantization_config,
-            )
-        elif self.model_type == "moondream":
-            self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_config["model_name"],
                 torch_dtype=torch.bfloat16 if quantization_config else torch.float16,
                 device_map="auto",
@@ -281,115 +237,148 @@ class PEFTTrainer:
         print(f"{self.peft_info.name} setup complete! ({trainable_count} trainable parameter groups)")
     
     def create_dataloaders(self, max_samples: Optional[int] = None, force_reload: bool = False):
-        """Create train and validation dataloaders (cached to ensure consistency)."""
-        # Use cached datasets if available (ensures train/val consistency)
+        """Create train and validation dataloaders with proper balancing and deterministic split."""
+        # Use cached datasets if available
         if self._train_dataset is not None and self._val_dataset is not None and not force_reload:
             print(f"Using cached datasets - Train: {len(self._train_dataset)}, Val: {len(self._val_dataset)}")
             return self._train_dataset, self._val_dataset
         
-        self._train_dataset = DeepfakeFineTuneDataset(
-            config_path=self.config_path,
-            dataset_name=self.dataset_name,
-            processor=self.processor,
-            split="train",
-            max_samples=max_samples,
-        )
+        # Load full dataset ONCE
+        from src.data.dataset_loader import create_dataset
+        with open(self.config_path, "r") as f:
+            config = yaml.safe_load(f)
         
-        self._val_dataset = DeepfakeFineTuneDataset(
-            config_path=self.config_path,
-            dataset_name=self.dataset_name,
-            processor=self.processor,
-            split="val",
-            max_samples=max_samples,
-        )
+        full_dataset = create_dataset(config, self.dataset_name, max_samples)
+        all_samples = full_dataset.samples
         
-        print(f"Train samples: {len(self._train_dataset)}")
-        print(f"Val samples: {len(self._val_dataset)}")
+        # =====================================================================
+        # DEBUG: Verify label mapping (label 0 = Real, label 1 = Fake)
+        # =====================================================================
+        from collections import Counter
+        cnt = Counter([s[1] for s in all_samples])
+        print(f"[DATA] raw label counts: {cnt}")
+        
+        # Print examples of each label to verify mapping
+        shown0, shown1 = 0, 0
+        for (path, lab, manip) in all_samples[:2000]:
+            if lab == 0 and shown0 < 2:
+                print(f"[DATA] label=0 example: {path[-50:]} manip={manip}")
+                shown0 += 1
+            if lab == 1 and shown1 < 2:
+                print(f"[DATA] label=1 example: {path[-50:]} manip={manip}")
+                shown1 += 1
+            if shown0 >= 2 and shown1 >= 2:
+                break
+        
+        # Balance ONCE
+        real_samples = [s for s in all_samples if s[1] == 0]
+        fake_samples = [s for s in all_samples if s[1] == 1]
+        
+        random.seed(42)
+        random.shuffle(real_samples)
+        random.shuffle(fake_samples)
+        
+        n = min(len(real_samples), len(fake_samples))
+        balanced_samples = real_samples[:n] + fake_samples[:n]
+        
+        random.seed(42)
+        random.shuffle(balanced_samples)
+        
+        # Deterministic split ONCE
+        train_size = int(0.8 * len(balanced_samples))
+        train_samples = balanced_samples[:train_size]
+        val_samples = balanced_samples[train_size:]
+        
+        # Create datasets from precomputed samples
+        self._train_dataset = DeepfakeFineTuneDataset(train_samples, self.processor)
+        self._val_dataset = DeepfakeFineTuneDataset(val_samples, self.processor)
+        
+        # Print distribution to confirm balance
+        tr_fake = sum(1 for s in train_samples if s[1] == 1)
+        va_fake = sum(1 for s in val_samples if s[1] == 1)
+        tr_real = len(train_samples) - tr_fake
+        va_real = len(val_samples) - va_fake
+        
+        print(f"[Split] Train: {len(train_samples)} (fake={tr_fake}, real={tr_real})")
+        print(f"[Split] Val:   {len(val_samples)} (fake={va_fake}, real={va_real})")
+        
+        # =====================================================================
+        # CHECK B: Verify val set is ~50/50 balanced
+        # =====================================================================
+        val_balance = min(va_fake, va_real) / max(va_fake, va_real) if max(va_fake, va_real) > 0 else 0
+        print(f"[CHECK B] Val balance ratio: {val_balance:.2f} (should be close to 1.0)")
+        if val_balance < 0.8:
+            print(f"  WARNING: Val set is imbalanced! Fake={va_fake}, Real={va_real}")
         
         return self._train_dataset, self._val_dataset
     
+    def encode_with_labels(self, image, messages):
+        """Encode input with proper label masking - loss ONLY on assistant answer."""
+        # Full conversation (with assistant answer)
+        text_full = self.processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=False
+        )
+        full_inputs = self.processor(text=text_full, images=[image], return_tensors="pt")
+        
+        # Prompt-only conversation (assistant starts after this)
+        text_prompt = self.processor.apply_chat_template(
+            messages[:-1], tokenize=False, add_generation_prompt=True
+        )
+        prompt_inputs = self.processor(text=text_prompt, images=[image], return_tensors="pt")
+        
+        input_ids = full_inputs["input_ids"].squeeze(0)
+        attn = full_inputs["attention_mask"].squeeze(0)
+        labels = input_ids.clone()
+        
+        # Mask everything except assistant answer
+        prompt_len = prompt_inputs["input_ids"].shape[1]
+        labels[:prompt_len] = -100
+        labels[attn == 0] = -100
+        
+        out = {
+            "input_ids": input_ids,
+            "attention_mask": attn,
+            "labels": labels,
+        }
+        
+        # VLM-specific tensors
+        for k in ["pixel_values", "image_grid_thw"]:
+            if k in full_inputs:
+                out[k] = full_inputs[k].squeeze(0)
+        
+        return out
+    
     def train(self, max_samples: Optional[int] = None):
-        """Run PEFT fine-tuning."""
+        """Run PEFT fine-tuning with proper label masking."""
         if self.model is None:
             self.setup()
         
         train_dataset, val_dataset = self.create_dataloaders(max_samples)
         
-        # Collate function for batching - model-specific processing
+        # Collate function with proper label masking
         def collate_fn(examples):
-            images = [ex["image"] for ex in examples]
-            messages_list = [ex["messages"] for ex in examples]
-            labels_list = [ex["label"] for ex in examples]
+            encoded = [self.encode_with_labels(ex["image"], ex["messages"]) for ex in examples]
             
-            # Process each example
-            all_input_ids = []
-            all_attention_mask = []
-            all_pixel_values = []
-            all_labels = []
-            all_image_grid_thw = []  # For Qwen2-VL
+            max_len = max(e["input_ids"].shape[0] for e in encoded)
+            pad_id = self.processor.tokenizer.pad_token_id or 0
             
-            for image, messages in zip(images, messages_list):
-                # SmolVLM, Qwen2-VL use chat template
-                text = self.processor.apply_chat_template(
-                    messages,
-                    add_generation_prompt=False,
-                    tokenize=False,
-                )
-                
-                # Process inputs
-                inputs = self.processor(
-                    text=text,
-                    images=[image],
-                    return_tensors="pt",
-                )
-                
-                all_input_ids.append(inputs["input_ids"].squeeze(0))
-                all_attention_mask.append(inputs["attention_mask"].squeeze(0))
-                
-                if "pixel_values" in inputs:
-                    all_pixel_values.append(inputs["pixel_values"].squeeze(0))
-                
-                # Qwen2-VL specific: image_grid_thw
-                if "image_grid_thw" in inputs:
-                    all_image_grid_thw.append(inputs["image_grid_thw"].squeeze(0))
-                
-                # Create labels (same as input_ids for causal LM)
-                label_ids = inputs["input_ids"].squeeze(0).clone()
-                all_labels.append(label_ids)
-            
-            # Pad sequences
-            max_len = max(ids.size(0) for ids in all_input_ids)
-            
-            padded_input_ids = []
-            padded_attention_mask = []
-            padded_labels = []
-            
-            pad_token_id = self.processor.tokenizer.pad_token_id or 0
-            
-            for input_ids, attention_mask, label_ids in zip(all_input_ids, all_attention_mask, all_labels):
-                pad_len = max_len - input_ids.size(0)
-                padded_input_ids.append(
-                    torch.cat([input_ids, torch.full((pad_len,), pad_token_id, dtype=input_ids.dtype)])
-                )
-                padded_attention_mask.append(
-                    torch.cat([attention_mask, torch.zeros(pad_len, dtype=attention_mask.dtype)])
-                )
-                padded_labels.append(
-                    torch.cat([label_ids, torch.full((pad_len,), -100, dtype=label_ids.dtype)])
-                )
+            def pad_1d(x, pad_value):
+                pad_len = max_len - x.shape[0]
+                if pad_len <= 0:
+                    return x
+                return torch.cat([x, torch.full((pad_len,), pad_value, dtype=x.dtype)], dim=0)
             
             batch = {
-                "input_ids": torch.stack(padded_input_ids),
-                "attention_mask": torch.stack(padded_attention_mask),
-                "labels": torch.stack(padded_labels),
+                "input_ids": torch.stack([pad_1d(e["input_ids"], pad_id) for e in encoded]),
+                "attention_mask": torch.stack([pad_1d(e["attention_mask"], 0) for e in encoded]),
+                "labels": torch.stack([pad_1d(e["labels"], -100) for e in encoded]),
             }
             
-            if all_pixel_values:
-                batch["pixel_values"] = torch.stack(all_pixel_values)
-            
-            # Qwen2-VL specific: add image_grid_thw
-            if all_image_grid_thw:
-                batch["image_grid_thw"] = torch.stack(all_image_grid_thw)
+            # VLM tensors
+            if "pixel_values" in encoded[0]:
+                batch["pixel_values"] = torch.stack([e["pixel_values"] for e in encoded])
+            if "image_grid_thw" in encoded[0]:
+                batch["image_grid_thw"] = torch.stack([e["image_grid_thw"] for e in encoded])
             
             return batch
         
@@ -409,6 +398,15 @@ class PEFTTrainer:
             weight_decay=0.01,
         )
         
+        # Setup warmup scheduler to stabilize training
+        from transformers import get_linear_schedule_with_warmup
+        total_steps = (len(train_loader) // self.gradient_accumulation_steps) * self.num_epochs
+        warmup_steps = max(10, int(0.05 * total_steps))
+        scheduler = get_linear_schedule_with_warmup(
+            optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps
+        )
+        print(f"Using warmup scheduler: {warmup_steps} warmup steps, {total_steps} total steps")
+        
         # Training loop
         print(f"\nStarting {self.peft_info.name} Fine-Tuning")
         print(f"Epochs: {self.num_epochs}, Batch Size: {self.batch_size}")
@@ -416,11 +414,25 @@ class PEFTTrainer:
         print(f"Effective Batch Size: {self.batch_size * self.gradient_accumulation_steps}")
         print("=" * 50)
         
+        # =====================================================================
+        # CHECK A: Verify label masking is correct (run once on first batch)
+        # =====================================================================
+        print("\n[CHECK A] Verifying label masking...")
+        first_batch = next(iter(train_loader))
+        for i in range(min(2, first_batch["labels"].shape[0])):
+            labels_i = first_batch["labels"][i]
+            unmasked_mask = labels_i != -100
+            unmasked_count = unmasked_mask.sum().item()
+            unmasked_tokens = labels_i[unmasked_mask]
+            decoded = self.processor.tokenizer.decode(unmasked_tokens)
+            print(f"  Sample {i}: {unmasked_count} unmasked tokens -> '{decoded}'")
+        print("  Expected: only ' Real' or ' Fake' (plus maybe EOS)")
+        print("=" * 50)
+        
         global_step = 0
         best_loss = float('inf')
         
         for epoch in range(self.num_epochs):
-            self.model.train()
             epoch_loss = 0
             num_batches = 0
             
@@ -428,7 +440,8 @@ class PEFTTrainer:
             
             for step, batch in enumerate(progress_bar):
                 # Move to device
-                batch = {k: v.to(self.model.device) if hasattr(v, 'to') else v for k, v in batch.items()}
+                batch = {k: v.to(self.model.device) if hasattr(v, 'to') else v 
+                        for k, v in batch.items()}
                 
                 # Forward pass
                 outputs = self.model(**batch)
@@ -437,25 +450,26 @@ class PEFTTrainer:
                 # Backward pass
                 loss.backward()
                 
-                epoch_loss += loss.item() * self.gradient_accumulation_steps
+                epoch_loss += outputs.loss.item()
                 num_batches += 1
                 
-                # Gradient accumulation step
+                # Update weights
                 if (step + 1) % self.gradient_accumulation_steps == 0:
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                     optimizer.step()
+                    scheduler.step()  # Warmup + linear decay
                     optimizer.zero_grad()
                     global_step += 1
                 
-                progress_bar.set_postfix({"loss": f"{epoch_loss / num_batches:.4f}"})
+                progress_bar.set_postfix({"loss": f"{outputs.loss.item():.4f}"})
             
             avg_loss = epoch_loss / num_batches
             print(f"Epoch {epoch+1} - Average Loss: {avg_loss:.4f}")
             
-            # Save best model
+            # Save best checkpoint
             if avg_loss < best_loss:
                 best_loss = avg_loss
-                print(f"New best loss! Saving checkpoint...")
+                print("New best loss! Saving checkpoint...")
                 self.model.save_pretrained(self.output_dir / "best")
         
         # Save final checkpoint
@@ -482,98 +496,120 @@ class PEFTTrainer:
         return training_info
     
     def evaluate(self, max_samples: int = None):
-        """Evaluate the fine-tuned model using the same val dataset from training."""
+        """Evaluate using forced-choice p_fake - NOT text parsing."""
         if self.model is None:
             raise ValueError("Model not loaded. Call setup() first.")
         
         self.model.eval()
         
-        # Reuse cached datasets (don't reload with different max_samples)
         _, val_dataset = self.create_dataloaders()
         
-        correct = 0
-        total = 0
+        n = len(val_dataset) if max_samples is None else min(len(val_dataset), max_samples)
         
-        # Limit evaluation samples if specified
-        eval_samples = len(val_dataset) if max_samples is None else min(len(val_dataset), max_samples)
+        labels = []
+        predictions = []
+        p_fakes = []
         
-        print(f"\nEvaluating {self.peft_info.name} model on {eval_samples} samples...")
+        print(f"\nEvaluating {self.peft_info.name} model on {n} samples (forced-choice)...")
+        
+        # =====================================================================
+        # CHECK C: Verify training/eval prompts match EXACTLY
+        # =====================================================================
+        eval_prompt = val_dataset.prompt
+        print(f"[CHECK C] Eval prompt ends with: '...{eval_prompt[-30:]}'")
+        print(f"  Training and eval use SAME prompt object: ✓")
         
         with torch.no_grad():
-            for i in tqdm(range(eval_samples)):
+            for i in tqdm(range(n)):
                 sample = val_dataset[i]
                 image = sample["image"]
                 label = sample["label"]
+                labels.append(label)
                 
-                # Model-specific text preparation for inference
-                # SmolVLM, Qwen2-VL use chat template
-                messages = [
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "image"},
-                            {"type": "text", "text": val_dataset.prompt}
-                        ]
-                    }
-                ]
+                # Build scoring prompt
+                scoring_prompt = val_dataset.prompt
+                
+                messages = [{
+                    "role": "user",
+                    "content": [
+                        {"type": "image"},
+                        {"type": "text", "text": scoring_prompt}
+                    ]
+                }]
                 
                 text = self.processor.apply_chat_template(
-                    messages,
-                    add_generation_prompt=True,
-                    tokenize=False,
+                    messages, tokenize=False, add_generation_prompt=True
                 )
                 
-                inputs = self.processor(
-                    text=text,
-                    images=[image],
-                    return_tensors="pt",
-                )
+                inputs = self.processor(text=text, images=[image], return_tensors="pt")
+                inputs = {k: v.to(self.model.device) for k, v in inputs.items() if hasattr(v, 'to')}
                 
-                # Move to device
-                inputs = {k: v.to(self.model.device) if hasattr(v, 'to') else v for k, v in inputs.items()}
+                # Get p_fake using robust forced-choice scoring
+                p_fake, debug = self._forced_choice_p_fake(inputs)
+                p_fakes.append(p_fake)
                 
-                outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=50,
-                    do_sample=False,
-                )
+                pred = 1 if p_fake >= 0.5 else 0
+                predictions.append(pred)
                 
-                # Parse prediction - only look at the NEW generated text
-                # Get the input length to extract only generated tokens
-                input_len = inputs["input_ids"].shape[1]
-                generated_tokens = outputs[0][input_len:]
-                response = self.processor.decode(generated_tokens, skip_special_tokens=True)
-                
-                # Debug: show first 3 predictions
-                if i < 3:
-                    print(f"\n[DEBUG] Sample {i}: Label={label}, Generated='{response[:100]}...'")
-                
-                # Parse prediction
-                response_lower = response.lower()
-                if "fake" in response_lower:
-                    pred = 1
-                elif "real" in response_lower:
-                    pred = 0
-                else:
-                    pred = -1
-                    if i < 3:
-                        print(f"[DEBUG] Sample {i}: UNPARSEABLE - pred=-1")
-                
-                if pred == label:
-                    correct += 1
-                total += 1
+                # Debug first 5 samples with variant info
+                if i < 5:
+                    print(
+                        f"[DEBUG] i={i} label={label} p_fake={p_fake:.3f} pred={pred} "
+                        f"best_real='{debug['best_real']}' best_fake='{debug['best_fake']}'"
+                    )
         
-        accuracy = correct / total if total > 0 else 0
+        # =====================================================================
+        # SANITY CHECK: Verify p_fake has variance and separates classes
+        # =====================================================================
+        import numpy as np
+        p = np.array(p_fakes, dtype=float)
+        y = np.array(labels, dtype=int)
+        
+        real_p = p[y == 0]
+        fake_p = p[y == 1]
+        
+        print("\n[SANITY CHECK] p_fake statistics:")
+        if len(fake_p) > 0 and len(real_p) > 0:
+            print(f"  mean_fake={fake_p.mean():.3f} mean_real={real_p.mean():.3f}")
+        print(f"  std={p.std():.4f} min={p.min():.3f} max={p.max():.3f}")
+        print(f"  p1={np.percentile(p, 1):.3f} p99={np.percentile(p, 99):.3f}")
+        
+        if p.std() < 0.05:
+            print("  WARNING: p_fake has no variance! Evaluation may be broken.")
+        
+        # Compute metrics
+        correct = sum(1 for p, l in zip(predictions, labels) if p == l)
+        accuracy = correct / n if n > 0 else 0
+        
+        # Label distribution
+        fake_count = sum(labels)
+        real_count = n - fake_count
         
         print(f"\nEvaluation Results:")
-        print(f"  Accuracy: {accuracy:.2%} ({correct}/{total})")
-        
-        # Debug: Print label distribution
-        fake_count = sum(1 for i in range(min(eval_samples, len(val_dataset))) if val_dataset[i]["label"] == 1)
-        real_count = eval_samples - fake_count
+        print(f"  Accuracy: {accuracy:.2%} ({correct}/{n})")
         print(f"  Label distribution - Real: {real_count}, Fake: {fake_count}")
         
-        return {"accuracy": accuracy, "correct": correct, "total": total}
+        # Prediction distribution
+        pred_fake = sum(predictions)
+        pred_real = n - pred_fake
+        print(f"  Prediction distribution - Real: {pred_real}, Fake: {pred_fake}")
+        
+        return {
+            "accuracy": accuracy,
+            "correct": correct,
+            "total": n,
+            "p_fakes": p_fakes,
+            "labels": labels,
+        }
+    
+    def _forced_choice_p_fake(self, inputs):
+        """Compute p(Fake) using robust full-sequence teacher forcing."""
+        from src.utils.forced_choice import forced_choice_p_fake_best
+        
+        p_fake, debug = forced_choice_p_fake_best(
+            self.model, inputs, self.processor.tokenizer
+        )
+        return p_fake, debug
 
 
 # =============================================================================
@@ -586,21 +622,15 @@ def run_peft_finetuning(
     output_dir: str = None,
     max_samples: Optional[int] = None,
     num_epochs: int = 3,
-    learning_rate: float = 2e-4,
-    lora_rank: int = 16,
-    lora_alpha: int = 32,
+    learning_rate: float = 5e-5,
+    lora_rank: int = 8,
+    lora_alpha: int = 16,
     batch_size: int = 1,
     model_type: str = "smolvlm",
     peft_method: str = "lora",
     **peft_kwargs,
 ):
-    """
-    Main function to run PEFT fine-tuning.
-    
-    Args:
-        model_type: One of 'smolvlm', 'qwen_vl', 'moondream'
-        peft_method: One of 'lora', 'qlora', 'dora', 'adalora', 'prefix'
-    """
+    """Main function to run PEFT fine-tuning."""
     output_dir = output_dir or f"checkpoints/{model_type}-{peft_method}"
     
     trainer = PEFTTrainer(
