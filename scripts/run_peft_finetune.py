@@ -67,7 +67,7 @@ PEFT Methods Available:
     parser.add_argument(
         "--dataset",
         type=str,
-        default="celebdf",
+        default="faceforensics",
         help="Dataset name from configs/model_configs.yaml",
     )
     

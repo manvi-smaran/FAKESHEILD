@@ -619,7 +619,7 @@ class PEFTTrainer:
 
 def run_peft_finetuning(
     config_path: str = "configs/model_configs.yaml",
-    dataset_name: str = "celebdf",
+    dataset_name: str = "faceforensics",
     output_dir: str = None,
     max_samples: Optional[int] = None,
     num_epochs: int = 3,

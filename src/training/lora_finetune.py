@@ -121,7 +121,7 @@ class LoRATrainer:
         self.processor = None
         self.tokenizer = None
         self.config_path = "configs/model_configs.yaml"
-        self.dataset_name = "celebdf"
+        self.dataset_name = "faceforensics"
     
     def setup(self):
         """Load model and apply LoRA."""

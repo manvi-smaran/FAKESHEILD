@@ -27,7 +27,7 @@ def main():
     parser.add_argument(
         "--dataset",
         type=str,
-        default="celebdf",
+        default="faceforensics",
         choices=["celebdf", "faceforensics"],
         help="Dataset to train on",
     )
