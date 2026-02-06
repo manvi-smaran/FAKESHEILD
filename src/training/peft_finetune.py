@@ -62,8 +62,8 @@ class DeepfakeFineTuneDataset(Dataset):
         # Load image
         image = Image.open(frame_path).convert("RGB")
         
-        # Strict one-word targets (leading space for tokenizer)
-        response = " Real" if label == 0 else " Fake"
+        # Strict one-word targets (no leading space - chat template handles it)
+        response = "Real" if label == 0 else "Fake"
         
         # Create conversation format
         messages = [
@@ -159,7 +159,7 @@ class PEFTTrainer:
         self.model = None
         self.processor = None
         self.config_path = "configs/model_configs.yaml"
-        self.dataset_name = "celebdf"
+        self.dataset_name = "faceforensics"
         
         # Datasets (cached after first creation)
         self._train_dataset = None
