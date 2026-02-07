@@ -62,6 +62,13 @@ class DeepfakeFineTuneDataset(Dataset):
         # Load image
         image = Image.open(frame_path).convert("RGB")
         
+        # Resize to cap max dimension at 640px (prevents slow Qwen2-VL processing)
+        max_dim = 640
+        if max(image.size) > max_dim:
+            ratio = max_dim / max(image.size)
+            new_size = (int(image.size[0] * ratio), int(image.size[1] * ratio))
+            image = image.resize(new_size, Image.LANCZOS)
+        
         # Strict one-word targets (no leading space - chat template handles it)
         response = "Real" if label == 0 else "Fake"
         
