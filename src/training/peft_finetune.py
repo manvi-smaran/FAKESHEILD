@@ -439,6 +439,7 @@ class PEFTTrainer:
         
         global_step = 0
         best_loss = float('inf')
+        epoch_losses = []  # Track loss per epoch
         
         for epoch in range(self.num_epochs):
             epoch_loss = 0
@@ -472,6 +473,7 @@ class PEFTTrainer:
                 progress_bar.set_postfix({"loss": f"{outputs.loss.item():.4f}"})
             
             avg_loss = epoch_loss / num_batches
+            epoch_losses.append(avg_loss)
             print(f"Epoch {epoch+1} - Average Loss: {avg_loss:.4f}")
             
             # Save best checkpoint
@@ -484,14 +486,22 @@ class PEFTTrainer:
         print(f"\nSaving final {self.peft_info.name} adapter...")
         self.model.save_pretrained(self.output_dir / "final")
         
-        # Save training info
+        # Save training info with comprehensive metrics
+        from datetime import datetime
         training_info = {
+            "timestamp": datetime.now().isoformat(),
             "model_type": self.model_type,
             "peft_method": self.peft_method,
+            "dataset": self.dataset_name,
             "lora_rank": self.lora_rank,
             "lora_alpha": self.lora_alpha,
             "num_epochs": self.num_epochs,
             "learning_rate": self.learning_rate,
+            "batch_size": self.batch_size,
+            "gradient_accumulation_steps": self.gradient_accumulation_steps,
+            "train_samples": len(self._train_dataset) if self._train_dataset else 0,
+            "val_samples": len(self._val_dataset) if self._val_dataset else 0,
+            "epoch_losses": epoch_losses,
             "best_loss": best_loss,
             "final_loss": avg_loss,
         }
@@ -602,13 +612,32 @@ class PEFTTrainer:
         pred_real = n - pred_fake
         print(f"  Prediction distribution - Real: {pred_real}, Fake: {pred_fake}")
         
-        return {
+        # Build comprehensive metrics
+        eval_metrics = {
             "accuracy": accuracy,
             "correct": correct,
             "total": n,
-            "p_fakes": p_fakes,
-            "labels": labels,
+            "label_distribution": {"real": real_count, "fake": fake_count},
+            "prediction_distribution": {"real": pred_real, "fake": pred_fake},
+            "p_fake_stats": {
+                "mean_fake": float(fake_p.mean()) if len(fake_p) > 0 else None,
+                "mean_real": float(real_p.mean()) if len(real_p) > 0 else None,
+                "separation": float(fake_p.mean() - real_p.mean()) if len(fake_p) > 0 and len(real_p) > 0 else None,
+                "std": float(p.std()),
+                "min": float(p.min()),
+                "max": float(p.max()),
+                "p1": float(np.percentile(p, 1)),
+                "p99": float(np.percentile(p, 99)),
+            },
         }
+        
+        # Save to file
+        eval_path = self.output_dir / "evaluation_results.json"
+        with open(eval_path, "w") as f:
+            json.dump(eval_metrics, f, indent=2)
+        print(f"\nEvaluation metrics saved to {eval_path}")
+        
+        return eval_metrics
     
     def _forced_choice_p_fake(self, inputs):
         """Compute p(Fake) using robust full-sequence teacher forcing."""
