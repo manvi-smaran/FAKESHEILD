@@ -149,8 +149,11 @@ class PEFTTrainer:
         self.model_config = MODEL_CONFIGS[model_type]
         self.peft_info = PEFT_METHODS[peft_method]
         
-        # Set output directory
-        self.output_dir = Path(output_dir or f"checkpoints/{model_type}-{peft_method}")
+        # Set output directory with timestamp to preserve previous runs
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base_dir = output_dir or f"checkpoints/{model_type}-{peft_method}"
+        self.output_dir = Path(f"{base_dir}/{timestamp}")
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
         # Training hyperparameters
