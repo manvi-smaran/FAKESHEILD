@@ -109,7 +109,7 @@ MODEL_CONFIGS = {
     },
     "qwen_vl": {
         "model_name": "Qwen/Qwen2-VL-2B-Instruct",
-        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],  # Conservative: attention only
+        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],  # Attention + MLP
         "processor_class": "AutoProcessor", 
         "model_class": "Qwen2VLForConditionalGeneration",
     },
