@@ -151,6 +151,7 @@ def create_peft_config(
             beta1=kwargs.get("beta1", 0.85),
             beta2=kwargs.get("beta2", 0.85),
             orth_reg_weight=kwargs.get("orth_reg_weight", 0.5),
+            total_step=kwargs.get("total_step", 10000),
             target_modules=target_modules,
             lora_alpha=alpha,
             lora_dropout=kwargs.get("lora_dropout", 0.05),
