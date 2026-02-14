@@ -15,6 +15,8 @@ class DeepfakeDataset:
         frame_format: str = "jpg",
         max_samples: Optional[int] = None,
         seed: int = 42,
+        celebdf_path: Optional[str] = None,
+        faceforensics_path: Optional[str] = None,
     ):
         self.root_path = Path(root_path)
         self.dataset_type = dataset_type
@@ -23,6 +25,8 @@ class DeepfakeDataset:
         self.frame_format = frame_format
         self.max_samples = max_samples
         self.seed = seed
+        self.celebdf_path = Path(celebdf_path) if celebdf_path else None
+        self.faceforensics_path = Path(faceforensics_path) if faceforensics_path else None
         
         self.samples: List[Tuple[Path, int, str]] = []
         self._load_samples()
@@ -34,11 +38,40 @@ class DeepfakeDataset:
             self._load_celebdf()
         elif self.dataset_type == "faceforensics":
             self._load_faceforensics()
+        elif self.dataset_type == "combined":
+            self._load_combined()
         else:
             raise ValueError(f"Unknown dataset type: {self.dataset_type}")
         
         if self.max_samples and len(self.samples) > self.max_samples:
             self.samples = random.sample(self.samples, self.max_samples)
+
+    def _load_combined(self):
+        """Load both Celeb-DF and FaceForensics samples."""
+        if not self.celebdf_path or not self.faceforensics_path:
+            raise ValueError("Both celebdf_path and faceforensics_path must be provided for combined dataset")
+            
+        # Load Celeb-DF (temporarily swap root_path)
+        original_root = self.root_path
+        self.root_path = self.celebdf_path
+        self.frame_format = "jpg" # Celeb-DF is jpg
+        self._load_celebdf()
+        celeb_count = len(self.samples)
+        
+        # Load FaceForensics
+        self.root_path = self.faceforensics_path
+        self.frame_format = "png" # FaceForensics is png (usually) - verified in loader it looks for multiple extensions
+        
+        # Set default manipulation types for FF if not set
+        if not self.manipulation_types:
+             self.manipulation_types = ["original", "Deepfakes", "Face2Face", "FaceSwap", "FaceShifter", "NeuralTextures"]
+             
+        self._load_faceforensics()
+        ff_count = len(self.samples) - celeb_count
+        
+        # Restore root path (though not strictly used after loading)
+        self.root_path = original_root
+        print(f"[DATA] Combined loaded: {celeb_count} from Celeb-DF, {ff_count} from FaceForensics")
     
     def _load_celebdf(self):
         real_dirs = [
@@ -192,10 +225,12 @@ def create_dataset(config: dict, dataset_name: str, max_samples: Optional[int] =
     dataset_config = config["datasets"][dataset_name]
     
     return DeepfakeDataset(
-        root_path=dataset_config["root_path"],
+        root_path=dataset_config.get("root_path", ""), # Optional for combined
         dataset_type=dataset_name,
         manipulation_types=dataset_config.get("manipulation_types"),
         compression=dataset_config.get("compression", "c23"),
         frame_format=dataset_config.get("frame_format", "jpg"),
         max_samples=max_samples,
+        celebdf_path=dataset_config.get("celebdf_path"),
+        faceforensics_path=dataset_config.get("faceforensics_path"),
     )

@@ -59,6 +59,13 @@ datasets:
     compression: "c23"
     test_split: 0.2
 
+  combined:
+    root_path: "" # Placeholder, individual paths used
+    celebdf_path: "./data/celeb_df"
+    faceforensics_path: "./data/faceforensics"
+    frame_format: "jpg" # Default, overridden by loader logic
+    test_split: 0.2
+
 evaluation:
   few_shot_k: [2, 4, 8]
   metrics:
