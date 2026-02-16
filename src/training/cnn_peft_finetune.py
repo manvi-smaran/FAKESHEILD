@@ -321,12 +321,42 @@ class CNNPEFTTrainer:
         
         return out
     
+    def _find_embed_tokens(self):
+        """Find the embed_tokens module through PEFT wrapper hierarchy."""
+        # PEFT wraps: PeftModel → base_model → model (original) → model (inner) → embed_tokens
+        # Try multiple paths to handle different PEFT versions
+        candidates = [
+            # PeftModel → Qwen2VLForConditionalGeneration → Qwen2VLModel → embed_tokens
+            lambda: self.model.base_model.model.model.embed_tokens,
+            # Direct model access
+            lambda: self.model.model.model.embed_tokens,
+            # Without PEFT wrapper
+            lambda: self.model.model.embed_tokens,
+        ]
+        
+        for get_embed in candidates:
+            try:
+                embed = get_embed()
+                if embed is not None and hasattr(embed, 'weight'):
+                    return embed
+            except AttributeError:
+                continue
+        
+        # Debug: print model structure to help diagnose
+        print("[DEBUG] Model structure (first 3 levels):")
+        for name, _ in self.model.named_modules():
+            if name.count('.') <= 3:
+                print(f"  {name}")
+        
+        raise RuntimeError("Cannot find embed_tokens module in model")
+    
     def _inject_forensic_tokens(self, batch, forensic_tokens):
         """
         Prepend forensic tokens to the VLM's input embeddings.
         
-        This is the key innovation: we get the VLM's embedding layer output,
-        prepend our CNN forensic tokens, and extend attention mask + labels.
+        Strategy: Get text embeddings via embed_tokens, prepend forensic tokens,
+        then pass inputs_embeds (instead of input_ids) along with pixel_values
+        so the model can still process vision tokens internally.
         
         Args:
             batch: dict with input_ids, attention_mask, labels, pixel_values, etc.
@@ -339,42 +369,15 @@ class CNNPEFTTrainer:
         B = forensic_tokens.shape[0]
         num_ft = self.num_forensic_tokens
         
-        # Get the model's embedding of the original input
-        # We need to call the model's embedding layer directly
-        base_model = self.model.base_model.model if hasattr(self.model, 'base_model') else self.model
-        
-        # Use model.model.embed_tokens for the text embedding
-        # But we also need visual embeddings merged in
-        # The cleanest way: do a forward with output_hidden_states, but that's wasteful
-        # Instead: use model.prepare_inputs_for_generation-style approach
-        # 
-        # Actually, the simplest approach: call model forward with inputs_embeds
-        # We need to first get the merged embeddings (text + vision)
-        
-        # Get text embeddings
-        embed_module = None
-        if hasattr(base_model, 'model') and hasattr(base_model.model, 'embed_tokens'):
-            embed_module = base_model.model.embed_tokens
-        elif hasattr(base_model, 'embed_tokens'):
-            embed_module = base_model.embed_tokens
-        
-        if embed_module is None:
-            raise RuntimeError("Cannot find embed_tokens module in model")
+        # Get embed_tokens module
+        embed_module = self._find_embed_tokens()
         
         # Get text token embeddings
         input_ids = batch["input_ids"]
         text_embeds = embed_module(input_ids)  # [B, seq_len, hidden_size]
         
-        # For Qwen2-VL, vision tokens are merged into the embeddings
-        # during forward. We handle this by:
-        # 1. Letting the model handle vision embedding internally
-        # 2. Prepending forensic tokens to attention_mask and labels only
-        # 3. Adding forensic tokens at the embedding level
-        
-        # Prepend forensic tokens to text embeddings
-        # Note: Vision tokens will be injected by the model's own forward pass
-        # We prepend forensic tokens BEFORE all other tokens
-        inputs_embeds = torch.cat([forensic_tokens, text_embeds], dim=1)  # [B, num_ft + seq_len, hidden]
+        # Prepend forensic tokens before all other tokens
+        inputs_embeds = torch.cat([forensic_tokens, text_embeds], dim=1)
         
         # Extend attention mask
         forensic_attn = torch.ones(B, num_ft, dtype=batch["attention_mask"].dtype, device=device)
