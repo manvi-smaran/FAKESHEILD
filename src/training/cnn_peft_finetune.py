@@ -323,14 +323,16 @@ class CNNPEFTTrainer:
     
     def _find_embed_tokens(self):
         """Find the embed_tokens module through PEFT wrapper hierarchy."""
-        # PEFT wraps: PeftModel → base_model → model (original) → model (inner) → embed_tokens
-        # Try multiple paths to handle different PEFT versions
+        # Qwen2-VL has: visual + language_model sub-modules
+        # PEFT wraps: PeftModel → base_model → model → model → language_model → model → embed_tokens
         candidates = [
-            # PeftModel → Qwen2VLForConditionalGeneration → Qwen2VLModel → embed_tokens
+            # Qwen2-VL with PEFT: base_model.model.model.language_model.model.embed_tokens
+            lambda: self.model.base_model.model.model.language_model.model.embed_tokens,
+            # Qwen2-VL without PEFT
+            lambda: self.model.model.language_model.model.embed_tokens,
+            # Generic fallbacks
             lambda: self.model.base_model.model.model.embed_tokens,
-            # Direct model access
             lambda: self.model.model.model.embed_tokens,
-            # Without PEFT wrapper
             lambda: self.model.model.embed_tokens,
         ]
         
@@ -343,9 +345,9 @@ class CNNPEFTTrainer:
                 continue
         
         # Debug: print model structure to help diagnose
-        print("[DEBUG] Model structure (first 3 levels):")
+        print("[DEBUG] Model structure (first 4 levels):")
         for name, _ in self.model.named_modules():
-            if name.count('.') <= 3:
+            if name.count('.') <= 4 and 'embed' in name.lower():
                 print(f"  {name}")
         
         raise RuntimeError("Cannot find embed_tokens module in model")
