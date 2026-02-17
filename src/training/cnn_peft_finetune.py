@@ -326,9 +326,12 @@ class CNNPEFTTrainer:
         # Qwen2-VL has: visual + language_model sub-modules
         # PEFT wraps: PeftModel → base_model → model → model → language_model → model → embed_tokens
         candidates = [
-            # Qwen2-VL with PEFT: base_model.model.model.language_model.model.embed_tokens
+            # Qwen2-VL with PEFT (confirmed from debug output)
+            lambda: self.model.base_model.model.model.language_model.embed_tokens,
+            # Also try with extra .model in case of different versions
             lambda: self.model.base_model.model.model.language_model.model.embed_tokens,
             # Qwen2-VL without PEFT
+            lambda: self.model.model.language_model.embed_tokens,
             lambda: self.model.model.language_model.model.embed_tokens,
             # Generic fallbacks
             lambda: self.model.base_model.model.model.embed_tokens,
