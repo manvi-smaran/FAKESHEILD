@@ -226,11 +226,23 @@ class CNNPEFTTrainer:
         )
         
         # Move CNN to same device as model
+        # Use float32 for CNN to avoid NaN from half-precision gradient accumulation
         device = next(self.model.parameters()).device
-        self.forensic_cnn = self.forensic_cnn.to(device).to(torch.float16)
+        self.forensic_cnn = self.forensic_cnn.to(device).to(torch.float32)
         
         total_cnn, trainable_cnn = self.forensic_cnn.count_parameters()
         print(f"  CNN parameters: {total_cnn:,} (all trainable)")
+        
+        # 5. Verify language_model sub-module is accessible for hook injection
+        try:
+            lm = self._get_language_model()
+            print(f"  Language model found: {type(lm).__name__} (hook target ✓)")
+        except RuntimeError as e:
+            print(f"  [WARN] {e}")
+            print("  Falling back — printing model structure for debugging:")
+            for name, _ in self.model.named_modules():
+                if name.count('.') <= 4:
+                    print(f"    {name}")
         
         # Enable training
         self.model.train()
@@ -322,77 +334,174 @@ class CNNPEFTTrainer:
         return out
     
     def _find_embed_tokens(self):
-        """Find the embed_tokens module through PEFT wrapper hierarchy."""
-        # Qwen2-VL has: visual + language_model sub-modules
-        # PEFT wraps: PeftModel → base_model → model → model → language_model → model → embed_tokens
-        candidates = [
-            # Qwen2-VL with PEFT (confirmed from debug output)
-            lambda: self.model.base_model.model.model.language_model.embed_tokens,
-            # Also try with extra .model in case of different versions
-            lambda: self.model.base_model.model.model.language_model.model.embed_tokens,
-            # Qwen2-VL without PEFT
-            lambda: self.model.model.language_model.embed_tokens,
-            lambda: self.model.model.language_model.model.embed_tokens,
-            # Generic fallbacks
-            lambda: self.model.base_model.model.model.embed_tokens,
-            lambda: self.model.model.model.embed_tokens,
-            lambda: self.model.model.embed_tokens,
-        ]
+        """Find the embed_tokens module using standard HuggingFace API."""
+        embed = self.model.get_input_embeddings()
+        if embed is not None:
+            return embed
+        raise RuntimeError("Cannot find embed_tokens module in model")
+    
+    def _get_language_model(self):
+        """
+        Find the inner language_model sub-module (the transformer decoder)
+        through the PEFT wrapper hierarchy.
         
-        for get_embed in candidates:
+        In Qwen2-VL: Qwen2VLModel contains language_model + visual encoder.
+        After PEFT: PeftModel → base_model → model → model → language_model
+        We need the language_model to register our injection hook.
+        """
+        # Search named_modules for the language_model that contains transformer layers
+        for name, module in self.model.named_modules():
+            if name.endswith('.language_model') and hasattr(module, 'layers'):
+                return module
+        
+        # Fallback: try direct attribute paths
+        candidates = [
+            lambda: self.model.base_model.model.model.language_model,
+            lambda: self.model.model.model.language_model,
+            lambda: self.model.base_model.model.model,  # older structure without language_model
+        ]
+        for get_lm in candidates:
             try:
-                embed = get_embed()
-                if embed is not None and hasattr(embed, 'weight'):
-                    return embed
+                lm = get_lm()
+                if lm is not None and hasattr(lm, 'layers'):
+                    return lm
             except AttributeError:
                 continue
         
-        # Debug: print model structure to help diagnose
-        print("[DEBUG] Model structure (first 4 levels):")
-        for name, _ in self.model.named_modules():
-            if name.count('.') <= 4 and 'embed' in name.lower():
-                print(f"  {name}")
-        
-        raise RuntimeError("Cannot find embed_tokens module in model")
+        raise RuntimeError(
+            "Cannot find language_model sub-module. "
+            "Please check model structure with model.named_modules()"
+        )
     
-    def _inject_forensic_tokens(self, batch, forensic_tokens):
+    def _forward_with_forensic_tokens(self, batch, forensic_tokens):
         """
-        Prepend forensic tokens to the VLM's input embeddings.
+        Run model forward with forensic tokens injected via hook.
         
-        Strategy: Get text embeddings via embed_tokens, prepend forensic tokens,
-        then pass inputs_embeds (instead of input_ids) along with pixel_values
-        so the model can still process vision tokens internally.
+        Strategy (hook-based injection):
+        1. Pass input_ids + pixel_values normally to the model
+        2. Qwen2-VL internally: embeds text → merges vision tokens → computes 3D RoPE
+        3. A pre-hook on language_model intercepts inputs_embeds AFTER vision merging
+        4. Hook prepends forensic tokens and extends attention_mask
+        5. LLM decoder processes [forensic_tokens, vision+text_tokens] correctly
+        
+        This ensures vision processing and position IDs are computed correctly
+        before forensic tokens are injected.
         
         Args:
             batch: dict with input_ids, attention_mask, labels, pixel_values, etc.
             forensic_tokens: [B, num_tokens, hidden_size] from ForensicCNN
             
         Returns:
-            Modified inputs_embeds, attention_mask, labels for the model
+            Model outputs with loss
         """
         device = forensic_tokens.device
         B = forensic_tokens.shape[0]
         num_ft = self.num_forensic_tokens
         
-        # Get embed_tokens module
-        embed_module = self._find_embed_tokens()
-        
-        # Get text token embeddings
-        input_ids = batch["input_ids"]
-        text_embeds = embed_module(input_ids)  # [B, seq_len, hidden_size]
-        
-        # Prepend forensic tokens before all other tokens
-        inputs_embeds = torch.cat([forensic_tokens, text_embeds], dim=1)
-        
-        # Extend attention mask
-        forensic_attn = torch.ones(B, num_ft, dtype=batch["attention_mask"].dtype, device=device)
-        attention_mask = torch.cat([forensic_attn, batch["attention_mask"]], dim=1)
-        
-        # Extend labels (-100 for forensic tokens = don't compute loss on them)
+        # Pre-pad labels with -100 for forensic token positions
+        # (labels are consumed by the outer forward, not the language_model)
         forensic_labels = torch.full((B, num_ft), -100, dtype=batch["labels"].dtype, device=device)
-        labels = torch.cat([forensic_labels, batch["labels"]], dim=1)
+        padded_labels = torch.cat([forensic_labels, batch["labels"]], dim=1)
         
-        return inputs_embeds, attention_mask, labels
+        # Get the language_model sub-module for hook registration
+        language_model = self._get_language_model()
+        
+        # Storage for the hook to access forensic tokens
+        _hook_state = {"forensic_tokens": forensic_tokens, "consumed": False}
+        
+        def inject_forensic_hook(module, args, kwargs):
+            """Pre-hook that prepends forensic tokens to inputs_embeds."""
+            if _hook_state["consumed"]:
+                return args, kwargs
+            
+            ft = _hook_state["forensic_tokens"]
+            _hook_state["consumed"] = True
+            
+            # Extract inputs_embeds from kwargs or args
+            inputs_embeds = kwargs.get("inputs_embeds", None)
+            if inputs_embeds is None and len(args) > 0:
+                # inputs_embeds might be a positional arg
+                return args, kwargs
+            
+            if inputs_embeds is None:
+                return args, kwargs
+            
+            # Cast forensic tokens to match embedding dtype
+            ft = ft.to(dtype=inputs_embeds.dtype, device=inputs_embeds.device)
+            
+            # Prepend forensic tokens
+            kwargs["inputs_embeds"] = torch.cat([ft, inputs_embeds], dim=1)
+            
+            # Extend attention_mask if present
+            attn_mask = kwargs.get("attention_mask", None)
+            if attn_mask is not None:
+                forensic_attn = torch.ones(
+                    B, num_ft, dtype=attn_mask.dtype, device=attn_mask.device
+                )
+                kwargs["attention_mask"] = torch.cat([forensic_attn, attn_mask], dim=1)
+            
+            # Extend position_ids if present (simple sequential for forensic tokens)
+            position_ids = kwargs.get("position_ids", None)
+            if position_ids is not None and position_ids.dim() == 3:
+                # Qwen2-VL uses 3D position_ids [3, B, seq_len]
+                # For forensic tokens, use simple sequential positions starting at 0
+                ft_pos = torch.zeros(
+                    3, B, num_ft, dtype=position_ids.dtype, device=position_ids.device
+                )
+                for i in range(num_ft):
+                    ft_pos[:, :, i] = i
+                # Shift original position_ids by num_ft
+                kwargs["position_ids"] = torch.cat(
+                    [ft_pos, position_ids + num_ft], dim=2
+                )
+            elif position_ids is not None and position_ids.dim() == 2:
+                # Standard 2D position_ids [B, seq_len]
+                ft_pos = torch.arange(
+                    num_ft, dtype=position_ids.dtype, device=position_ids.device
+                ).unsqueeze(0).expand(B, -1)
+                kwargs["position_ids"] = torch.cat(
+                    [ft_pos, position_ids + num_ft], dim=1
+                )
+            
+            # Extend cache_position if present
+            cache_position = kwargs.get("cache_position", None)
+            if cache_position is not None:
+                ft_cache_pos = torch.arange(
+                    num_ft, dtype=cache_position.dtype, device=cache_position.device
+                )
+                kwargs["cache_position"] = torch.cat(
+                    [ft_cache_pos, cache_position + num_ft], dim=0
+                )
+            
+            return args, kwargs
+        
+        # Register the hook (with_kwargs=True to access kwargs)
+        hook_handle = language_model.register_forward_pre_hook(
+            inject_forensic_hook, with_kwargs=True
+        )
+        
+        try:
+            # Build forward kwargs — pass input_ids + pixel_values normally
+            # Let Qwen2-VL handle vision processing internally
+            forward_kwargs = {
+                "input_ids": batch["input_ids"],
+                "attention_mask": batch["attention_mask"],
+                "labels": padded_labels,
+            }
+            
+            # Include vision inputs for Qwen2-VL's internal processing
+            if "pixel_values" in batch:
+                forward_kwargs["pixel_values"] = batch["pixel_values"]
+            if "image_grid_thw" in batch:
+                forward_kwargs["image_grid_thw"] = batch["image_grid_thw"]
+            
+            # Forward pass — model handles embedding + vision merge → hook injects forensic tokens → LLM decoder
+            outputs = self.model(**forward_kwargs)
+        finally:
+            # Always remove hook to prevent accumulation
+            hook_handle.remove()
+        
+        return outputs
     
     def train(self, max_samples=None):
         """Run CNN + PEFT hybrid fine-tuning."""
@@ -477,40 +586,34 @@ class CNNPEFTTrainer:
             for step, batch in enumerate(progress_bar):
                 device = next(self.model.parameters()).device
                 
-                # 1. Extract forensic features with CNN
-                cnn_inputs = batch.pop("cnn_inputs").to(device).to(torch.float16)
-                forensic_tokens = self.forensic_cnn(cnn_inputs)  # [B, 4, 1536]
+                # 1. Extract forensic features with CNN (CNN runs in float32 for stability)
+                cnn_inputs = batch.pop("cnn_inputs").to(device).to(torch.float32)
+                forensic_tokens = self.forensic_cnn(cnn_inputs)  # [B, 4, 1536] in float32
                 
                 # 2. Move VLM inputs to device
                 batch = {k: v.to(device) if hasattr(v, 'to') else v for k, v in batch.items()}
                 
-                # 3. Forward pass with forensic token injection
-                # We pass forensic tokens as additional context
-                # The model's forward handles vision token merging internally
-                # We inject forensic tokens by modifying the input embeddings
-                inputs_embeds, attention_mask, labels = self._inject_forensic_tokens(batch, forensic_tokens)
+                # 3. Forward pass with hook-based forensic token injection
+                # The model processes input_ids + pixel_values normally
+                # (vision merging, 3D RoPE, etc. all happen correctly)
+                # A pre-hook on language_model prepends forensic tokens
+                # right before the LLM decoder processes them
+                outputs = self._forward_with_forensic_tokens(batch, forensic_tokens)
                 
-                # Build forward kwargs (include vision inputs for Qwen2-VL)
-                forward_kwargs = {
-                    "inputs_embeds": inputs_embeds,
-                    "attention_mask": attention_mask,
-                    "labels": labels,
-                }
+                # NaN-safe loss handling
+                raw_loss = outputs.loss
+                if torch.isnan(raw_loss) or torch.isinf(raw_loss):
+                    print(f"[WARN] Step {step}: NaN/Inf loss detected, skipping backward")
+                    optimizer.zero_grad()
+                    num_batches += 1
+                    continue
                 
-                # Add pixel_values and image_grid_thw for vision processing
-                if "pixel_values" in batch:
-                    forward_kwargs["pixel_values"] = batch["pixel_values"]
-                if "image_grid_thw" in batch:
-                    forward_kwargs["image_grid_thw"] = batch["image_grid_thw"]
-                
-                # Forward
-                outputs = self.model(**forward_kwargs)
-                loss = outputs.loss / self.gradient_accumulation_steps
+                loss = raw_loss / self.gradient_accumulation_steps
                 
                 # Backward (gradients flow to both LoRA and CNN)
                 loss.backward()
                 
-                epoch_loss += outputs.loss.item()
+                epoch_loss += raw_loss.item()
                 num_batches += 1
                 
                 if (step + 1) % self.gradient_accumulation_steps == 0:
@@ -522,7 +625,12 @@ class CNNPEFTTrainer:
                     optimizer.zero_grad()
                     global_step += 1
                 
-                progress_bar.set_postfix({"loss": f"{outputs.loss.item():.4f}"})
+                progress_bar.set_postfix({"loss": f"{raw_loss.item():.4f}"})
+                
+                # Debug: log first few steps
+                if step < 3 and epoch == 0:
+                    print(f"  [DEBUG] step={step} loss={raw_loss.item():.6f} "
+                          f"forensic_norm={forensic_tokens.norm():.4f}")
             
             avg_loss = epoch_loss / num_batches
             epoch_losses.append(avg_loss)
@@ -604,7 +712,7 @@ class CNNPEFTTrainer:
                 
                 # Get forensic tokens
                 device = next(self.model.parameters()).device
-                cnn_tensor = cnn_input.unsqueeze(0).to(device).to(torch.float16)
+                cnn_tensor = cnn_input.unsqueeze(0).to(device).to(torch.float32)
                 forensic_tokens = self.forensic_cnn(cnn_tensor)
                 
                 # Use forced-choice scoring
