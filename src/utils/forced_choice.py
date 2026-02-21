@@ -78,14 +78,17 @@ def score_completion_tokens(
         outputs = model(**ext_inputs, use_cache=False)
         logits = outputs.logits  # [1, seq_len, vocab]
 
-    # Assert alignment
-    assert logits.shape[1] == input_ids_ext.shape[1], (
-        f"logits seq_len {logits.shape[1]} != input_ids seq_len {input_ids_ext.shape[1]}"
+    # The model may output more positions than input_ids if hooks inject
+    # additional tokens (e.g., forensic tokens prepended via forward hooks).
+    # These extra positions appear at the beginning of the sequence.
+    offset = logits.shape[1] - input_ids_ext.shape[1]
+    assert offset >= 0, (
+        f"logits seq_len {logits.shape[1]} < input_ids seq_len {input_ids_ext.shape[1]}"
     )
 
     # logits[i] predicts token[i+1]
-    # For completion token t, predictive logits at position (prompt_len + t - 1)
-    start = prompt_len - 1
+    # For completion token t, predictive logits at position (offset + prompt_len + t - 1)
+    start = offset + prompt_len - 1
     end = start + comp.shape[1]
     logits_slice = logits[0, start:end, :]                   # [T, vocab]
 
