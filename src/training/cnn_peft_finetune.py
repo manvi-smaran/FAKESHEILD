@@ -671,7 +671,7 @@ class CNNPEFTTrainer:
         return training_info
     
     def evaluate(self, max_samples=None):
-        """Evaluate using forced-choice p_fake scoring."""
+        """Evaluate using forced-choice p_fake scoring WITH forensic token injection."""
         if self.model is None:
             raise ValueError("Model not loaded. Call setup() first.")
         
@@ -686,47 +686,121 @@ class CNNPEFTTrainer:
         p_fakes = []
         
         print(f"\nEvaluating CNN + {self.peft_info.name} on {n} samples...")
+        print(f"  (forensic tokens ENABLED via hook injection)")
         
-        with torch.no_grad():
-            for i in tqdm(range(n)):
-                sample = val_dataset[i]
-                image = sample["image"]
-                cnn_input = sample["cnn_input"]
-                label = sample["label"]
-                labels_list.append(label)
-                
-                scoring_prompt = val_dataset.prompt
-                messages = [{
-                    "role": "user",
-                    "content": [
-                        {"type": "image"},
-                        {"type": "text", "text": scoring_prompt}
-                    ]
-                }]
-                
-                text = self.processor.apply_chat_template(
-                    messages, tokenize=False, add_generation_prompt=True
+        # Get language_model for hook registration
+        language_model = self._get_language_model()
+        
+        # Shared state for the hook — updated per sample
+        _eval_hook_state = {"forensic_tokens": None, "active": False}
+        
+        def eval_inject_hook(module, args, kwargs):
+            """Persistent hook that injects forensic tokens during eval."""
+            if not _eval_hook_state["active"] or _eval_hook_state["forensic_tokens"] is None:
+                return args, kwargs
+            
+            ft = _eval_hook_state["forensic_tokens"]
+            inputs_embeds = kwargs.get("inputs_embeds", None)
+            
+            if inputs_embeds is None:
+                return args, kwargs
+            
+            B = inputs_embeds.shape[0]
+            num_ft = ft.shape[1]
+            
+            # Cast and prepend
+            ft = ft.to(dtype=inputs_embeds.dtype, device=inputs_embeds.device)
+            
+            # Handle batch size mismatch (ft is [1, num_ft, hidden], embeds may differ)
+            if ft.shape[0] != B:
+                ft = ft.expand(B, -1, -1)
+            
+            kwargs["inputs_embeds"] = torch.cat([ft, inputs_embeds], dim=1)
+            
+            # Extend attention_mask
+            attn_mask = kwargs.get("attention_mask", None)
+            if attn_mask is not None:
+                forensic_attn = torch.ones(
+                    B, num_ft, dtype=attn_mask.dtype, device=attn_mask.device
                 )
-                inputs = self.processor(text=text, images=[image], return_tensors="pt")
-                inputs = {k: v.to(self.model.device) for k, v in inputs.items() if hasattr(v, 'to')}
-                
-                # Get forensic tokens
-                device = next(self.model.parameters()).device
-                cnn_tensor = cnn_input.unsqueeze(0).to(device).to(torch.float32)
-                forensic_tokens = self.forensic_cnn(cnn_tensor)
-                
-                # Use forced-choice scoring
-                from src.utils.forced_choice import forced_choice_p_fake_best
-                p_fake, debug = forced_choice_p_fake_best(
-                    self.model, inputs, self.processor.tokenizer
+                kwargs["attention_mask"] = torch.cat([forensic_attn, attn_mask], dim=1)
+            
+            # Extend position_ids
+            position_ids = kwargs.get("position_ids", None)
+            if position_ids is not None and position_ids.dim() == 3:
+                ft_pos = torch.zeros(
+                    3, B, num_ft, dtype=position_ids.dtype, device=position_ids.device
                 )
-                
-                p_fakes.append(p_fake)
-                pred = 1 if p_fake >= 0.5 else 0
-                predictions.append(pred)
-                
-                if i < 5:
-                    print(f"[DEBUG] i={i} label={label} p_fake={p_fake:.3f} pred={pred}")
+                for i in range(num_ft):
+                    ft_pos[:, :, i] = i
+                kwargs["position_ids"] = torch.cat(
+                    [ft_pos, position_ids + num_ft], dim=2
+                )
+            elif position_ids is not None and position_ids.dim() == 2:
+                ft_pos = torch.arange(
+                    num_ft, dtype=position_ids.dtype, device=position_ids.device
+                ).unsqueeze(0).expand(B, -1)
+                kwargs["position_ids"] = torch.cat(
+                    [ft_pos, position_ids + num_ft], dim=1
+                )
+            
+            return args, kwargs
+        
+        # Register persistent hook for entire evaluation
+        hook_handle = language_model.register_forward_pre_hook(
+            eval_inject_hook, with_kwargs=True
+        )
+        
+        try:
+            with torch.no_grad():
+                for i in tqdm(range(n)):
+                    sample = val_dataset[i]
+                    image = sample["image"]
+                    cnn_input = sample["cnn_input"]
+                    label = sample["label"]
+                    labels_list.append(label)
+                    
+                    scoring_prompt = val_dataset.prompt
+                    messages = [{
+                        "role": "user",
+                        "content": [
+                            {"type": "image"},
+                            {"type": "text", "text": scoring_prompt}
+                        ]
+                    }]
+                    
+                    text = self.processor.apply_chat_template(
+                        messages, tokenize=False, add_generation_prompt=True
+                    )
+                    inputs = self.processor(text=text, images=[image], return_tensors="pt")
+                    inputs = {k: v.to(self.model.device) for k, v in inputs.items() if hasattr(v, 'to')}
+                    
+                    # Compute forensic tokens and activate hook
+                    device = next(self.model.parameters()).device
+                    cnn_tensor = cnn_input.unsqueeze(0).to(device).to(torch.float32)
+                    forensic_tokens = self.forensic_cnn(cnn_tensor)
+                    
+                    # Update hook state — all model forward calls will now include forensic tokens
+                    _eval_hook_state["forensic_tokens"] = forensic_tokens
+                    _eval_hook_state["active"] = True
+                    
+                    # Forced-choice scoring (model forwards now include forensic tokens via hook)
+                    from src.utils.forced_choice import forced_choice_p_fake_best
+                    p_fake, debug = forced_choice_p_fake_best(
+                        self.model, inputs, self.processor.tokenizer
+                    )
+                    
+                    # Deactivate hook between samples
+                    _eval_hook_state["active"] = False
+                    
+                    p_fakes.append(p_fake)
+                    pred = 1 if p_fake >= 0.5 else 0
+                    predictions.append(pred)
+                    
+                    if i < 5:
+                        print(f"[DEBUG] i={i} label={label} p_fake={p_fake:.3f} pred={pred}")
+        finally:
+            hook_handle.remove()
         
         # Compute metrics
         import numpy as np
