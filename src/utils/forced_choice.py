@@ -144,7 +144,19 @@ def forced_choice_p_fake_best(
     }
 
 
+def append_classification_suffix(prompt: str) -> str:
+    """
+    Append a classification suffix to the prompt for forced-choice scoring.
+    Guides the model to respond with 'Real' or 'Fake'.
+    """
+    suffix = "\nClassify this image as either Real or Fake. Answer with one word:"
+    if suffix.strip() in prompt:
+        return prompt
+    return prompt.rstrip() + suffix
+
+
 # Legacy compatibility
 def forced_choice_p_fake(model, inputs, tokenizer, real_text=" Real", fake_text=" Fake"):
     """Legacy wrapper that uses the robust implementation."""
     return forced_choice_p_fake_best(model, inputs, tokenizer)
+
