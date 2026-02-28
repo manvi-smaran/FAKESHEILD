@@ -218,21 +218,25 @@ Is this image Real or Fake? Answer with one word:"""
 
 
 def make_few_shot_prompt(k):
-    """Build a text-only few-shot prompt (no extra images needed)."""
+    """Build a text-only few-shot prompt using descriptive examples from prompts.py."""
+    from src.utils.prompts import FEW_SHOT_EXAMPLE_REAL, FEW_SHOT_EXAMPLE_FAKE
+
     examples = []
-    for i in range(k // 2):
-        examples.append(f"Example {2*i+1}: [real face image] → Real")
-        examples.append(f"Example {2*i+2}: [manipulated face image] → Fake")
+    idx = 1
+    for _ in range(k // 2):
+        examples.append(FEW_SHOT_EXAMPLE_REAL.format(idx=idx))
+        idx += 1
+        examples.append(FEW_SHOT_EXAMPLE_FAKE.format(idx=idx))
+        idx += 1
 
-    return f"""You are an expert deepfake detector. Here are {k} labeled examples:
+    examples_str = "\n\n".join(examples)
 
-{chr(10).join(examples)}
+    return f"""You are analyzing facial images to detect deepfakes. Here are {k} labeled examples:
 
-Key patterns:
-- Real faces: consistent lighting, natural skin texture, sharp boundaries
-- Fake faces: blending artifacts, inconsistent lighting, unnatural smoothness
+{examples_str}
 
-Now analyze this new image. Is it Real or Fake? Answer with one word:"""
+Now analyze this new image.
+Is this a real photograph or a deepfake? Answer with one word: Real or Fake."""
 
 
 def main():
