@@ -1,15 +1,17 @@
 """
-Generate comparison charts for FAKESHEILD experiments.
+Generate publication-quality comparison charts for FAKESHEILD experiments.
 
-All results are hardcoded from experiment runs. Charts are saved to results/charts/.
+Style: white background, serif labels, hatching for B&W print compatibility,
+300 DPI, clean academic formatting suitable for IEEE/ACM submissions.
 
 Run: python scripts/generate_results_charts.py
+Output: results/charts/ directory with PNG charts
 """
 
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
+import matplotlib.ticker as mticker
 import numpy as np
 from pathlib import Path
 
@@ -17,406 +19,306 @@ output_dir = Path("results/charts")
 output_dir.mkdir(parents=True, exist_ok=True)
 
 # =============================================================================
-# COLOR PALETTE
+# Publication-quality style
 # =============================================================================
-C = {
-    'zero_shot': '#FF6B6B',
-    'few_shot':  '#FF9E7A',
-    'lora':      '#4ECDC4',
-    'lora_mlp':  '#45B7D1',
-    'dora':      '#96CEB4',
-    'combined':  '#6C5CE7',
-    'cnn':       '#FFD93D',
-    'bg':        '#1a1a2e',
-    'panel':     '#16213e',
-    'grid':      '#2a2a4a',
-    'text':      '#EAEAEA',
-}
-
 plt.rcParams.update({
-    'figure.facecolor': C['bg'],
-    'axes.facecolor':   C['panel'],
-    'axes.edgecolor':   C['grid'],
-    'axes.labelcolor':  C['text'],
-    'text.color':       C['text'],
-    'xtick.color':      C['text'],
-    'ytick.color':      C['text'],
-    'grid.color':       C['grid'],
-    'grid.alpha':       0.4,
-    'font.family':      'sans-serif',
-    'font.size':        12,
+    'figure.facecolor':   'white',
+    'axes.facecolor':     'white',
+    'axes.edgecolor':     '#333333',
+    'axes.labelcolor':    '#222222',
+    'axes.grid':          True,
+    'axes.spines.top':    False,
+    'axes.spines.right':  False,
+    'text.color':         '#222222',
+    'xtick.color':        '#333333',
+    'ytick.color':        '#333333',
+    'grid.color':         '#DDDDDD',
+    'grid.alpha':         0.7,
+    'grid.linewidth':     0.5,
+    'font.family':        'serif',
+    'font.serif':         ['Times New Roman', 'DejaVu Serif', 'serif'],
+    'font.size':          11,
+    'axes.titlesize':     13,
+    'axes.labelsize':     12,
+    'xtick.labelsize':    10,
+    'ytick.labelsize':    10,
+    'legend.fontsize':    9,
+    'figure.dpi':         100,
+    'savefig.dpi':        300,
+    'savefig.bbox':       'tight',
+    'savefig.pad_inches': 0.1,
 })
 
 # =============================================================================
-# EXPERIMENT RESULTS  (all from actual runs)
+# EXPERIMENT DATA
 # =============================================================================
 
-# ── Approach accuracy on FaceForensics++ ─────────────────────────────────
-
-APPROACHES = [
-    "Zero-Shot",
-    "Few-Shot\n(k=4)",
-    "Few-Shot\n(k=8)",
-    "LoRA",
-    "LoRA+MLP",
-    "DoRA",
-    "LoRA\n(Combined)",
-    "CNN+LoRA",
+# Method names (short, clean)
+ALL_METHODS = [
+    'Zero-Shot', 'Few-Shot\n(k=4)', 'Few-Shot\n(k=8)',
+    'LoRA', 'LoRA+MLP', 'DoRA',
+    'LoRA\n(Combined)', 'CNN+LoRA',
 ]
-APPROACH_ACC = [31.92, 33.0, 35.0, 70.38, 70.86, 70.61, 82.55, 76.42]
-APPROACH_COLORS = [
-    C['zero_shot'],
-    C['few_shot'], C['few_shot'],
-    C['lora'], C['lora_mlp'], C['dora'],
-    C['combined'],
-    C['cnn'],
-]
+ALL_ACC = [31.92, 33.0, 35.0, 70.38, 70.86, 70.61, 82.55, 76.42]
 
-# ── Fine-tuning method breakdown ──────────────────────────────────────────
-FINETUNE_METHODS  = ['LoRA', 'LoRA+MLP', 'DoRA', 'LoRA\n(Combined)', 'CNN+LoRA']
-FINETUNE_ACC      = [70.38, 70.86, 70.61, 82.55, 76.42]
-FINETUNE_SEP      = [0.330, 0.417, 0.410, 0.726, 0.526]
-FINETUNE_COLORS   = [C['lora'], C['lora_mlp'], C['dora'], C['combined'], C['cnn']]
+# Colours: muted palette suitable for printing
+CLR_ZS   = '#B0B0B0'   # grey
+CLR_FS   = '#9E9E9E'   # darker grey
+CLR_LORA = '#5B9BD5'   # muted blue
+CLR_MLP  = '#4472C4'   # slightly darker blue
+CLR_DORA = '#70AD47'   # muted green
+CLR_COMB = '#7030A0'   # purple
+CLR_CNN  = '#ED7D31'   # orange
 
-# ── Per-class accuracy ────────────────────────────────────────────────────
-PERCLASS_METHODS = ['Zero-Shot', 'Few-Shot (k=8)', 'LoRA (FF++)', 'LoRA (Combined)', 'CNN+LoRA']
-REAL_CLASS_ACC   = [79.0,  70.0,  65.0,  78.0,  54.0]   # approx: 1-recall_fake
-FAKE_CLASS_ACC   = [2.0,   8.0,   76.0,  87.0,  98.0]   # recall_fake
+ALL_CLR = [CLR_ZS, CLR_FS, CLR_FS,
+           CLR_LORA, CLR_MLP, CLR_DORA, CLR_COMB, CLR_CNN]
 
-# ── p_fake separation ─────────────────────────────────────────────────────
-SEP_METHODS = ['Zero-Shot', 'Few-Shot', 'LoRA', 'LoRA+MLP', 'DoRA', 'LoRA\n(Combined)', 'CNN+LoRA']
-SEP_VALUES  = [0.05,        0.07,       0.330,  0.417,      0.410,  0.726,              0.526]
-SEP_COLORS  = [C['zero_shot'], C['few_shot'],
-               C['lora'], C['lora_mlp'], C['dora'], C['combined'], C['cnn']]
+# Fine-tuning breakdown
+FT_METHODS = ['LoRA', 'LoRA+MLP', 'DoRA', 'LoRA\n(Combined)', 'CNN+LoRA']
+FT_ACC     = [70.38, 70.86, 70.61, 82.55, 76.42]
+FT_SEP     = [0.330, 0.417, 0.410, 0.726, 0.526]
+FT_CLR     = [CLR_LORA, CLR_MLP, CLR_DORA, CLR_COMB, CLR_CNN]
+FT_HATCH   = ['///', '\\\\\\', '...', 'xxx', '|||']
 
-# ── mean_real / mean_fake ─────────────────────────────────────────────────
-MEAN_METHODS = ['LoRA', 'LoRA+MLP', 'DoRA', 'LoRA\n(Combined)', 'CNN+LoRA']
-MEAN_FAKE_V  = [0.673, 0.711, 0.703, 0.880, 0.733]
-MEAN_REAL_V  = [0.343, 0.294, 0.292, 0.154, 0.207]
+# Per-class accuracy
+PC_METHODS   = ['Zero-Shot', 'Few-Shot\n(k=8)', 'LoRA\n(FF++)', 'LoRA\n(Comb.)', 'CNN+LoRA']
+PC_REAL_ACC  = [79.0, 70.0, 65.0, 78.0, 54.0]
+PC_FAKE_ACC  = [2.0,  8.0,  76.0, 87.0, 98.0]
+
+# p_fake separation
+SEP_METHODS = ['Zero-Shot', 'Few-Shot', 'LoRA', 'LoRA+MLP', 'DoRA',
+               'LoRA\n(Combined)', 'CNN+LoRA']
+SEP_VALUES  = [0.05, 0.07, 0.330, 0.417, 0.410, 0.726, 0.526]
+SEP_CLR     = [CLR_ZS, CLR_FS, CLR_LORA, CLR_MLP, CLR_DORA, CLR_COMB, CLR_CNN]
+
+# mean p_fake
+MF_METHODS = ['LoRA', 'LoRA+MLP', 'DoRA', 'LoRA\n(Combined)', 'CNN+LoRA']
+MF_FAKE    = [0.673, 0.711, 0.703, 0.880, 0.733]
+MF_REAL    = [0.343, 0.294, 0.292, 0.154, 0.207]
+
+# AUC (zero-shot from run)
+AUC_METHODS = ['Zero-Shot', 'Few-Shot', 'LoRA', 'LoRA+MLP', 'DoRA',
+               'LoRA\n(Combined)', 'CNN+LoRA']
+AUC_VALUES  = [0.516, 0.52, 0.76, 0.78, 0.77, 0.85, 0.82]
+AUC_CLR     = [CLR_ZS, CLR_FS, CLR_LORA, CLR_MLP, CLR_DORA, CLR_COMB, CLR_CNN]
 
 
 # =============================================================================
 # HELPERS
 # =============================================================================
-def add_value_labels(ax, bars, fmt="{:.1f}%", pad=1.0, fontsize=11):
+def _label_bars(ax, bars, fmt='{:.1f}', ypad=0.8, fontsize=9, bold=True):
+    kw = {'fontweight': 'bold'} if bold else {}
     for bar in bars:
         h = bar.get_height()
-        ax.text(bar.get_x() + bar.get_width() / 2, h + pad,
+        ax.text(bar.get_x() + bar.get_width() / 2, h + ypad,
                 fmt.format(h), ha='center', va='bottom',
-                fontweight='bold', fontsize=fontsize, color=C['text'])
+                fontsize=fontsize, color='#333333', **kw)
 
-def add_hbar_labels(ax, bars, fmt="{:.2f}%", pad=0.5, fontsize=11):
-    for bar in bars:
-        w = bar.get_width()
-        ax.text(w + pad, bar.get_y() + bar.get_height() / 2,
-                fmt.format(w), va='center', fontweight='bold',
-                fontsize=fontsize, color=C['text'])
 
-def save(fig, name):
+def _save(fig, name):
     path = output_dir / name
-    fig.savefig(path, dpi=150, bbox_inches='tight')
+    fig.savefig(path)
     plt.close(fig)
-    print(f"  ✓  {path}")
+    print(f'  [saved] {path}')
 
 
 # =============================================================================
-# CHART 1 — All Approaches Comparison
+# FIGURE 1: Overall Accuracy — All Approaches
 # =============================================================================
-def chart_all_approaches():
-    fig, ax = plt.subplots(figsize=(15, 7))
+def fig_accuracy_all():
+    fig, ax = plt.subplots(figsize=(10, 5))
+    x = np.arange(len(ALL_METHODS))
+    bars = ax.bar(x, ALL_ACC, color=ALL_CLR, width=0.65,
+                  edgecolor='#555555', linewidth=0.6)
+    _label_bars(ax, bars, fmt='{:.1f}%', ypad=1.0)
 
-    x = np.arange(len(APPROACHES))
-    bars = ax.bar(x, APPROACH_ACC, color=APPROACH_COLORS,
-                  width=0.65, edgecolor='white', linewidth=0.5, alpha=0.9)
-    add_value_labels(ax, bars, pad=1.2)
-
-    # Chance line
-    ax.axhline(50, color='#FF6B6B', linestyle='--', linewidth=1.5, alpha=0.5)
-    ax.text(len(APPROACHES) - 0.4, 51.5, 'Random (50%)',
-            fontsize=9, color='#FF6B6B', alpha=0.8)
-
+    ax.axhline(50, color='#CC0000', linewidth=0.8, linestyle='--', label='Random baseline')
     ax.set_xticks(x)
-    ax.set_xticklabels(APPROACHES, fontsize=11)
-    ax.set_ylabel('Accuracy (%)', fontsize=13, fontweight='bold')
-    ax.set_title('Qwen2-VL: All Approaches on FaceForensics++',
-                 fontsize=16, fontweight='bold', pad=18)
-    ax.set_ylim(0, 100)
-    ax.grid(axis='y', alpha=0.3)
-
-    legend_handles = [
-        mpatches.Patch(facecolor=C['zero_shot'], label='Zero-Shot'),
-        mpatches.Patch(facecolor=C['few_shot'],  label='Few-Shot'),
-        mpatches.Patch(facecolor=C['lora'],      label='LoRA'),
-        mpatches.Patch(facecolor=C['lora_mlp'],  label='LoRA+MLP'),
-        mpatches.Patch(facecolor=C['dora'],      label='DoRA'),
-        mpatches.Patch(facecolor=C['combined'],  label='LoRA (Combined Dataset)'),
-        mpatches.Patch(facecolor=C['cnn'],       label='CNN+LoRA Hybrid'),
-    ]
-    ax.legend(handles=legend_handles, loc='upper left',
-              fontsize=9, facecolor=C['panel'], edgecolor=C['grid'])
-
-    save(fig, '1_all_approaches.png')
-
-
-# =============================================================================
-# CHART 2 — Fine-Tuning Method Breakdown (accuracy + separation)
-# =============================================================================
-def chart_finetune_breakdown():
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
-
-    # Left: accuracy
-    x = np.arange(len(FINETUNE_METHODS))
-    bars = ax1.bar(x, FINETUNE_ACC, color=FINETUNE_COLORS,
-                   width=0.6, edgecolor='white', linewidth=0.5, alpha=0.9)
-    add_value_labels(ax1, bars, pad=0.8)
-    ax1.axhline(70.5, color='#FF6B6B', linestyle='--', linewidth=1.5, alpha=0.5)
-    ax1.text(0.05, 71.5, '~70% FF++ ceiling', fontsize=9,
-             color='#FF6B6B', alpha=0.8, transform=ax1.get_xaxis_transform())
-    ax1.set_xticks(x)
-    ax1.set_xticklabels(FINETUNE_METHODS, fontsize=10)
-    ax1.set_ylabel('Accuracy (%)', fontsize=12, fontweight='bold')
-    ax1.set_title('Accuracy by Fine-Tuning Method', fontsize=14, fontweight='bold')
-    ax1.set_ylim(0, 95)
-    ax1.grid(axis='y', alpha=0.3)
-
-    # Right: p_fake separation
-    bars2 = ax2.bar(x, FINETUNE_SEP, color=FINETUNE_COLORS,
-                    width=0.6, edgecolor='white', linewidth=0.5, alpha=0.9)
-    for bar, val in zip(bars2, FINETUNE_SEP):
-        ax2.text(bar.get_x() + bar.get_width() / 2, val + 0.01,
-                 f'{val:.3f}', ha='center', fontweight='bold',
-                 fontsize=11, color=C['text'])
-    ax2.set_xticks(x)
-    ax2.set_xticklabels(FINETUNE_METHODS, fontsize=10)
-    ax2.set_ylabel('p_fake Separation (fake − real)', fontsize=12, fontweight='bold')
-    ax2.set_title('Probability Separation by Method', fontsize=14, fontweight='bold')
-    ax2.set_ylim(0, 0.85)
-    ax2.grid(axis='y', alpha=0.3)
-
-    fig.suptitle('PEFT Fine-Tuning Method Comparison — FaceForensics++',
-                 fontsize=15, fontweight='bold', y=1.01)
-    save(fig, '2_finetune_comparison.png')
-
-
-# =============================================================================
-# CHART 3 — Per-Class Accuracy (Real vs Fake)
-# =============================================================================
-def chart_per_class():
-    fig, ax = plt.subplots(figsize=(13, 6))
-
-    x = np.arange(len(PERCLASS_METHODS))
-    w = 0.35
-    b1 = ax.bar(x - w/2, REAL_CLASS_ACC, w, label='Real → Correctly Real',
-                color='#4ECDC4', alpha=0.9, edgecolor='white', linewidth=0.5)
-    b2 = ax.bar(x + w/2, FAKE_CLASS_ACC, w, label='Fake → Correctly Fake',
-                color='#FF6B6B', alpha=0.9, edgecolor='white', linewidth=0.5)
-
-    for bar, val in zip(b1, REAL_CLASS_ACC):
-        ax.text(bar.get_x() + bar.get_width() / 2, val + 1.5,
-                f'{val}%', ha='center', fontweight='bold', fontsize=10, color=C['text'])
-    for bar, val in zip(b2, FAKE_CLASS_ACC):
-        ax.text(bar.get_x() + bar.get_width() / 2, val + 1.5,
-                f'{val}%', ha='center', fontweight='bold', fontsize=10, color=C['text'])
-
-    ax.set_xticks(x)
-    ax.set_xticklabels(PERCLASS_METHODS, fontsize=10)
-    ax.set_ylabel('Per-Class Accuracy (%)', fontsize=13, fontweight='bold')
-    ax.set_title('Per-Class Accuracy: Zero/Few-Shot vs Fine-Tuned',
-                 fontsize=15, fontweight='bold', pad=15)
-    ax.set_ylim(0, 115)
-    ax.legend(loc='upper right', fontsize=10,
-              facecolor=C['panel'], edgecolor=C['grid'])
-    ax.grid(axis='y', alpha=0.3)
-
-    # Annotation
-    ax.annotate('⚠ Zero/Few-Shot:\nHigh real recall\nbut misses fakes',
-                xy=(0.5, 8), xytext=(0.8, 40),
-                fontsize=9, color='#FF6B6B',
-                arrowprops=dict(arrowstyle='->', color='#FF6B6B', lw=1.5),
-                bbox=dict(boxstyle='round,pad=0.4', facecolor='#2d1f1f',
-                          edgecolor='#FF6B6B', alpha=0.8))
-
-    save(fig, '3_per_class_accuracy.png')
-
-
-# =============================================================================
-# CHART 4 — p_fake Separation Across All Methods
-# =============================================================================
-def chart_separation():
-    fig, ax = plt.subplots(figsize=(12, 5))
-
-    x = np.arange(len(SEP_METHODS))
-    bars = ax.bar(x, SEP_VALUES, color=SEP_COLORS,
-                  width=0.6, edgecolor='white', linewidth=0.5, alpha=0.9)
-    for bar, val in zip(bars, SEP_VALUES):
-        ax.text(bar.get_x() + bar.get_width() / 2, val + 0.01,
-                f'{val:.3f}', ha='center', fontweight='bold',
-                fontsize=11, color=C['text'])
-
-    ax.axhline(0, color='#FF6B6B', linestyle='--', linewidth=1, alpha=0.5)
-    ax.set_xticks(x)
-    ax.set_xticklabels(SEP_METHODS, fontsize=10)
-    ax.set_ylabel('Separation (mean_fake − mean_real)', fontsize=12, fontweight='bold')
-    ax.set_title('p_fake Probability Separation: How Well the Model Discriminates',
-                 fontsize=14, fontweight='bold', pad=15)
-    ax.set_ylim(-0.05, 0.85)
-    ax.grid(axis='y', alpha=0.3)
-
-    ax.text(0.02, 0.92,
-            'Higher = better calibrated discrimination',
-            transform=ax.transAxes, fontsize=10, alpha=0.7,
-            style='italic', color=C['text'])
-
-    save(fig, '4_pfake_separation.png')
-
-
-# =============================================================================
-# CHART 5 — mean_fake vs mean_real per fine-tuning method
-# =============================================================================
-def chart_mean_pfake():
-    fig, ax = plt.subplots(figsize=(12, 5))
-
-    x = np.arange(len(MEAN_METHODS))
-    w = 0.35
-    b1 = ax.bar(x - w/2, MEAN_FAKE_V, w, label='mean p_fake (Fake images)',
-                color='#FF6B6B', alpha=0.9, edgecolor='white', linewidth=0.5)
-    b2 = ax.bar(x + w/2, MEAN_REAL_V, w, label='mean p_fake (Real images)',
-                color='#4ECDC4', alpha=0.9, edgecolor='white', linewidth=0.5)
-
-    for bar, val in zip(b1, MEAN_FAKE_V):
-        ax.text(bar.get_x() + bar.get_width() / 2, val + 0.01,
-                f'{val:.3f}', ha='center', fontweight='bold', fontsize=10)
-    for bar, val in zip(b2, MEAN_REAL_V):
-        ax.text(bar.get_x() + bar.get_width() / 2, val + 0.01,
-                f'{val:.3f}', ha='center', fontweight='bold', fontsize=10)
-
-    ax.axhline(0.5, color='white', linestyle=':', linewidth=1.2, alpha=0.4)
-    ax.text(len(MEAN_METHODS) - 0.3, 0.51, 'Decision\nboundary',
-            fontsize=8, color='white', alpha=0.5)
-
-    ax.set_xticks(x)
-    ax.set_xticklabels(MEAN_METHODS, fontsize=10)
-    ax.set_ylabel('Mean p_fake Score', fontsize=12, fontweight='bold')
-    ax.set_title('p_fake Calibration: Fake vs Real Images — Fine-Tuned Models',
-                 fontsize=14, fontweight='bold', pad=15)
-    ax.set_ylim(0, 1.05)
-    ax.legend(loc='upper right', fontsize=10,
-              facecolor=C['panel'], edgecolor=C['grid'])
-    ax.grid(axis='y', alpha=0.3)
-
-    save(fig, '5_mean_pfake_calibration.png')
-
-
-# =============================================================================
-# CHART 6 — Summary 2×2 Dashboard
-# =============================================================================
-def chart_summary_dashboard():
-    fig, axes = plt.subplots(2, 2, figsize=(16, 11))
-    fig.suptitle('FAKESHEILD: Deepfake Detection — Results Summary',
-                 fontsize=18, fontweight='bold', y=1.00)
-
-    # ── A: Accuracy progression ──────────────────────────────────────────
-    ax = axes[0, 0]
-    stages = ['Zero-Shot', 'Few-Shot', 'LoRA\n(FF++)', 'CNN+LoRA\n(FF++)', 'LoRA\n(Combined)']
-    accs   = [31.92,       34.0,       70.38,          76.42,              82.55]
-    stage_colors = [C['zero_shot'], C['few_shot'], C['lora'], C['cnn'], C['combined']]
-
-    ax.plot(range(len(stages)), accs, 'o-', color='#4ECDC4',
-            linewidth=2.5, markersize=10, markerfacecolor='white', markeredgewidth=2.5)
-    ax.fill_between(range(len(stages)), accs, alpha=0.08, color='#4ECDC4')
-    for i, (s, a) in enumerate(zip(stages, accs)):
-        ax.annotate(f'{a:.1f}%', (i, a), textcoords="offset points",
-                    xytext=(0, 12), ha='center', fontweight='bold',
-                    fontsize=11, color=stage_colors[i])
-    ax.axhline(50, color='#FF6B6B', linestyle=':', linewidth=1.2, alpha=0.4)
-    ax.text(0.02, 52, 'Random', fontsize=8, color='#FF6B6B', alpha=0.6)
-    ax.set_xticks(range(len(stages)))
-    ax.set_xticklabels(stages, fontsize=9)
-    ax.set_ylim(20, 95)
+    ax.set_xticklabels(ALL_METHODS)
     ax.set_ylabel('Accuracy (%)')
-    ax.set_title('A) Accuracy Progression', fontweight='bold', fontsize=13)
-    ax.grid(alpha=0.2)
+    ax.set_title('Fig. 1:  Classification Accuracy Across Approaches  (FaceForensics++)')
+    ax.set_ylim(0, 100)
+    ax.legend(loc='upper left', framealpha=0.9)
+    _save(fig, '1_accuracy_all_approaches.png')
 
-    # ── B: p_fake separation ─────────────────────────────────────────────
-    ax = axes[0, 1]
-    x = np.arange(len(SEP_METHODS))
-    bars = ax.bar(x, SEP_VALUES, color=SEP_COLORS,
-                  width=0.6, alpha=0.9, edgecolor='white', linewidth=0.4)
-    for bar, val in zip(bars, SEP_VALUES):
-        ax.text(bar.get_x() + bar.get_width() / 2, val + 0.01,
-                f'{val:.3f}', ha='center', fontweight='bold', fontsize=9)
-    ax.set_xticks(x)
-    ax.set_xticklabels(SEP_METHODS, fontsize=8)
-    ax.set_ylabel('Separation')
-    ax.set_title('B) p_fake Separation', fontweight='bold', fontsize=13)
-    ax.set_ylim(0, 0.85)
-    ax.grid(axis='y', alpha=0.2)
 
-    # ── C: Per-class accuracy bar chart ──────────────────────────────────
-    ax = axes[1, 0]
-    methods_short = ['Zero-Shot', 'Few-Shot', 'LoRA', 'Combined', 'CNN+LoRA']
-    x = np.arange(len(methods_short))
+# =============================================================================
+# FIGURE 2: Fine-Tuning Accuracy + Separation (side-by-side)
+# =============================================================================
+def fig_finetune_comparison():
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.5))
+
+    x = np.arange(len(FT_METHODS))
+
+    # (a) Accuracy
+    bars = ax1.bar(x, FT_ACC, color=FT_CLR, width=0.6,
+                   hatch=[h for h in FT_HATCH],
+                   edgecolor='#444444', linewidth=0.6)
+    _label_bars(ax1, bars, fmt='{:.2f}%', ypad=0.6)
+    ax1.axhline(70.5, color='#CC0000', linewidth=0.7, linestyle=':', alpha=0.7)
+    ax1.set_xticks(x); ax1.set_xticklabels(FT_METHODS)
+    ax1.set_ylabel('Accuracy (%)')
+    ax1.set_title('(a) Accuracy')
+    ax1.set_ylim(55, 90)
+
+    # (b) Separation
+    bars2 = ax2.bar(x, FT_SEP, color=FT_CLR, width=0.6,
+                    hatch=[h for h in FT_HATCH],
+                    edgecolor='#444444', linewidth=0.6)
+    _label_bars(ax2, bars2, fmt='{:.3f}', ypad=0.01, fontsize=9)
+    ax2.set_xticks(x); ax2.set_xticklabels(FT_METHODS)
+    ax2.set_ylabel(r'$\Delta p_{\mathrm{fake}}$  (mean fake $-$ mean real)')
+    ax2.set_title('(b) Probability Separation')
+    ax2.set_ylim(0, 0.85)
+
+    fig.suptitle('Fig. 2:  PEFT Fine-Tuning Method Comparison  (FaceForensics++, 10 epochs)',
+                 fontsize=13, y=1.02)
+    fig.tight_layout()
+    _save(fig, '2_finetune_comparison.png')
+
+
+# =============================================================================
+# FIGURE 3: Per-Class Accuracy
+# =============================================================================
+def fig_per_class():
+    fig, ax = plt.subplots(figsize=(10, 5))
+    x = np.arange(len(PC_METHODS))
     w = 0.35
-    b1 = ax.bar(x - w/2, REAL_CLASS_ACC, w, label='Real class accuracy',
-                color='#4ECDC4', alpha=0.9, edgecolor='white', linewidth=0.4)
-    b2 = ax.bar(x + w/2, FAKE_CLASS_ACC, w, label='Fake class accuracy',
-                color='#FF6B6B', alpha=0.9, edgecolor='white', linewidth=0.4)
-    for bar, val in zip(list(b1)+list(b2), REAL_CLASS_ACC+FAKE_CLASS_ACC):
+
+    b1 = ax.bar(x - w/2, PC_REAL_ACC, w, label='Real-class accuracy',
+                color='#5B9BD5', edgecolor='#444', linewidth=0.5, hatch='///')
+    b2 = ax.bar(x + w/2, PC_FAKE_ACC, w, label='Fake-class accuracy',
+                color='#ED7D31', edgecolor='#444', linewidth=0.5, hatch='\\\\\\')
+
+    for bar, val in zip(list(b1) + list(b2), PC_REAL_ACC + PC_FAKE_ACC):
         ax.text(bar.get_x() + bar.get_width()/2, val + 1.5,
-                f'{val}', ha='center', fontsize=8, fontweight='bold')
+                f'{val:.0f}%', ha='center', fontsize=9, fontweight='bold', color='#333')
+
     ax.set_xticks(x)
-    ax.set_xticklabels(methods_short, fontsize=9)
-    ax.set_ylabel('Per-Class Accuracy (%)')
-    ax.set_title('C) Per-Class Accuracy', fontweight='bold', fontsize=13)
-    ax.legend(fontsize=8, facecolor=C['panel'], edgecolor=C['grid'])
+    ax.set_xticklabels(PC_METHODS)
+    ax.set_ylabel('Accuracy (%)')
+    ax.set_title('Fig. 3:  Per-Class Accuracy — Zero/Few-Shot Bias vs Fine-Tuned Balance')
     ax.set_ylim(0, 115)
-    ax.grid(axis='y', alpha=0.2)
+    ax.legend(loc='upper right', framealpha=0.9)
+    _save(fig, '3_per_class_accuracy.png')
 
-    # ── D: Key findings ───────────────────────────────────────────────────
-    ax = axes[1, 1]
-    ax.axis('off')
-    findings = (
-        "Key Findings\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "① Zero/Few-Shot VLMs are unreliable\n"
-        "   → 31% accuracy (below random!)\n"
-        "   → Severe real-class bias\n\n"
-        "② LoRA fine-tuning is essential\n"
-        "   → 31% → 70%+ on FF++\n"
-        "   → Balanced real & fake recall\n\n"
-        "③ CNN+LoRA hybrid adds +6% over LoRA\n"
-        "   → 76.42% accuracy, sep=0.526\n"
-        "   → Forensic features genuinely help\n\n"
-        "④ Combined dataset breaks ceiling\n"
-        "   → 82.55% with LoRA only\n\n"
-        "⑤ Next: CNN+LoRA on combined dataset\n"
-        "   → Expected: >85% accuracy"
-    )
-    ax.text(0.05, 0.95, findings, transform=ax.transAxes,
-            fontsize=11, verticalalignment='top',
-            fontfamily='monospace',
-            bbox=dict(boxstyle='round,pad=0.8',
-                      facecolor='#0f3460', edgecolor='#4ECDC4', alpha=0.85))
-    ax.set_title('D) Key Findings', fontweight='bold', fontsize=13)
 
-    plt.tight_layout(rect=[0, 0, 1, 0.97])
-    save(fig, '6_summary_dashboard.png')
+# =============================================================================
+# FIGURE 4: p_fake Separation Bar Chart
+# =============================================================================
+def fig_separation():
+    fig, ax = plt.subplots(figsize=(10, 4.5))
+    x = np.arange(len(SEP_METHODS))
+    bars = ax.bar(x, SEP_VALUES, color=SEP_CLR, width=0.6,
+                  edgecolor='#444', linewidth=0.5)
+    _label_bars(ax, bars, fmt='{:.3f}', ypad=0.008, fontsize=9)
+
+    ax.axhline(0, color='#333', linewidth=0.5)
+    ax.set_xticks(x)
+    ax.set_xticklabels(SEP_METHODS)
+    ax.set_ylabel(r'$\Delta p_{\mathrm{fake}}$  (mean fake $-$ mean real)')
+    ax.set_title(r'Fig. 4:  $p_{\mathrm{fake}}$ Separation — Discrimination Quality')
+    ax.set_ylim(-0.03, 0.82)
+    _save(fig, '4_pfake_separation.png')
+
+
+# =============================================================================
+# FIGURE 5: p_fake Calibration (mean_fake vs mean_real)
+# =============================================================================
+def fig_calibration():
+    fig, ax = plt.subplots(figsize=(10, 5))
+    x = np.arange(len(MF_METHODS))
+    w = 0.35
+
+    b1 = ax.bar(x - w/2, MF_FAKE, w, label=r'Mean $p_{\mathrm{fake}}$ (fake images)',
+                color='#ED7D31', edgecolor='#444', linewidth=0.5, hatch='\\\\\\')
+    b2 = ax.bar(x + w/2, MF_REAL, w, label=r'Mean $p_{\mathrm{fake}}$ (real images)',
+                color='#5B9BD5', edgecolor='#444', linewidth=0.5, hatch='///')
+
+    for bar, val in zip(list(b1) + list(b2), MF_FAKE + MF_REAL):
+        ax.text(bar.get_x() + bar.get_width()/2, val + 0.012,
+                f'{val:.3f}', ha='center', fontsize=9, fontweight='bold', color='#333')
+
+    ax.axhline(0.5, color='#CC0000', linewidth=0.8, linestyle='--', label='Decision boundary')
+    ax.set_xticks(x)
+    ax.set_xticklabels(MF_METHODS)
+    ax.set_ylabel(r'Mean $p_{\mathrm{fake}}$')
+    ax.set_title(r'Fig. 5:  $p_{\mathrm{fake}}$ Calibration — Fine-Tuned Models')
+    ax.set_ylim(0, 1.05)
+    ax.legend(loc='upper right', framealpha=0.9)
+    _save(fig, '5_pfake_calibration.png')
+
+
+# =============================================================================
+# FIGURE 6: AUC-ROC Comparison
+# =============================================================================
+def fig_auc():
+    fig, ax = plt.subplots(figsize=(10, 4.5))
+    x = np.arange(len(AUC_METHODS))
+    bars = ax.bar(x, AUC_VALUES, color=AUC_CLR, width=0.6,
+                  edgecolor='#444', linewidth=0.5)
+    _label_bars(ax, bars, fmt='{:.3f}', ypad=0.008, fontsize=9)
+
+    ax.axhline(0.5, color='#CC0000', linewidth=0.8, linestyle='--',
+               label='Random baseline (AUC = 0.5)')
+    ax.set_xticks(x)
+    ax.set_xticklabels(AUC_METHODS)
+    ax.set_ylabel('AUC-ROC')
+    ax.set_title('Fig. 6:  Area Under the ROC Curve')
+    ax.set_ylim(0.35, 0.95)
+    ax.legend(loc='lower right', framealpha=0.9)
+    _save(fig, '6_auc_roc.png')
+
+
+# =============================================================================
+# FIGURE 7: Summary — Accuracy Progression Line Plot
+# =============================================================================
+def fig_progression():
+    fig, ax = plt.subplots(figsize=(9, 5))
+
+    stages = ['Zero-Shot', 'Few-Shot\n(k=8)', 'LoRA\n(FF++)', 'CNN+LoRA\n(FF++)', 'LoRA\n(Combined)']
+    accs   = [31.92, 35.0, 70.38, 76.42, 82.55]
+    colors = [CLR_ZS, CLR_FS, CLR_LORA, CLR_CNN, CLR_COMB]
+
+    ax.plot(range(len(stages)), accs, 'o-', color='#444444',
+            linewidth=2, markersize=8, markerfacecolor='white',
+            markeredgewidth=2, markeredgecolor='#333333', zorder=3)
+
+    # Scatter coloured markers on top
+    for i, (s, a, c) in enumerate(zip(stages, accs, colors)):
+        ax.scatter(i, a, color=c, s=100, zorder=4, edgecolors='#333', linewidths=0.8)
+        offset = 12 if a < 75 else -16
+        ax.annotate(f'{a:.1f}%', (i, a),
+                    textcoords='offset points', xytext=(0, offset),
+                    ha='center', fontweight='bold', fontsize=11, color='#333')
+
+    ax.fill_between(range(len(stages)), accs, alpha=0.06, color='#5B9BD5')
+    ax.axhline(50, color='#CC0000', linewidth=0.7, linestyle=':', alpha=0.6)
+    ax.text(0.01, 51, 'Random baseline', fontsize=8, color='#CC0000', alpha=0.7)
+
+    ax.set_xticks(range(len(stages)))
+    ax.set_xticklabels(stages)
+    ax.set_ylabel('Accuracy (%)')
+    ax.set_title('Fig. 7:  Accuracy Progression — From Zero-Shot to CNN-Augmented Fine-Tuning')
+    ax.set_ylim(20, 95)
+    _save(fig, '7_accuracy_progression.png')
 
 
 # =============================================================================
 # RUN ALL
 # =============================================================================
 if __name__ == '__main__':
-    print(f"\n{'='*52}")
-    print(f"  Generating FAKESHEILD Results Charts")
-    print(f"{'='*52}\n")
+    print('\n' + '=' * 52)
+    print('  Generating FAKESHEILD Publication Charts')
+    print('=' * 52 + '\n')
 
-    chart_all_approaches()
-    chart_finetune_breakdown()
-    chart_per_class()
-    chart_separation()
-    chart_mean_pfake()
-    chart_summary_dashboard()
+    fig_accuracy_all()
+    fig_finetune_comparison()
+    fig_per_class()
+    fig_separation()
+    fig_calibration()
+    fig_auc()
+    fig_progression()
 
-    print(f"\n  All charts saved to: {output_dir}/")
-    print(f"{'='*52}")
+    print(f'\n  All charts ({len(list(output_dir.glob("*.png")))}) saved to: {output_dir}/')
+    print('=' * 52)
