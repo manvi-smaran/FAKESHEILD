@@ -26,6 +26,7 @@ Usage (on remote GPU machine):
 Output: results/charts/
 """
 
+import os
 import argparse
 import sys
 import random
@@ -107,12 +108,33 @@ def load_base_model():
     return model, processor
 
 
+def _validate_checkpoint(path, label, require_cnn=False):
+    """Validate checkpoint path exists and has required files."""
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"{label} checkpoint directory not found: {p}")
+    adapter_cfg = p / "adapter_config.json"
+    if not adapter_cfg.exists():
+        raise FileNotFoundError(
+            f"{label}: adapter_config.json not found in {p}\n"
+            f"  Contents: {[x.name for x in p.iterdir()]}"
+        )
+    if require_cnn:
+        cnn_pt = p / "forensic_cnn.pt"
+        if not cnn_pt.exists():
+            raise FileNotFoundError(
+                f"{label}: forensic_cnn.pt not found in {p}"
+            )
+    print(f"  [OK] {label} checkpoint validated: {p}")
+    return str(p)  # return as-is (matches working eval script)
+
+
 def load_lora_model(checkpoint_path):
     """Load base model with LoRA adapter applied."""
     from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
     from peft import PeftModel
 
-    ckpt = str(Path(checkpoint_path).resolve())  # absolute path for PEFT
+    ckpt = _validate_checkpoint(checkpoint_path, "LoRA")
     print(f"Loading LoRA from {ckpt}...")
     base = Qwen2VLForConditionalGeneration.from_pretrained(
         "Qwen/Qwen2-VL-2B-Instruct",
@@ -134,7 +156,7 @@ def load_cnn_lora_model(checkpoint_path, num_tokens=4):
     from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
     from peft import PeftModel
 
-    ckpt = str(Path(checkpoint_path).resolve())  # absolute path for PEFT
+    ckpt = _validate_checkpoint(checkpoint_path, "CNN+LoRA", require_cnn=True)
     print(f"Loading CNN+LoRA from {ckpt}...")
     base = Qwen2VLForConditionalGeneration.from_pretrained(
         "Qwen/Qwen2-VL-2B-Instruct",
