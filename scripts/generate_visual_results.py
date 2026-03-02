@@ -112,14 +112,15 @@ def load_lora_model(checkpoint_path):
     from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
     from peft import PeftModel
 
-    print(f"Loading LoRA from {checkpoint_path}...")
+    ckpt = str(Path(checkpoint_path).resolve())  # absolute path for PEFT
+    print(f"Loading LoRA from {ckpt}...")
     base = Qwen2VLForConditionalGeneration.from_pretrained(
         "Qwen/Qwen2-VL-2B-Instruct",
         torch_dtype=torch.float16,
         device_map="auto",
         trust_remote_code=True,
     )
-    model = PeftModel.from_pretrained(base, str(checkpoint_path))
+    model = PeftModel.from_pretrained(base, ckpt)
     model.eval()
 
     processor = AutoProcessor.from_pretrained(
@@ -133,14 +134,15 @@ def load_cnn_lora_model(checkpoint_path, num_tokens=4):
     from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
     from peft import PeftModel
 
-    print(f"Loading CNN+LoRA from {checkpoint_path}...")
+    ckpt = str(Path(checkpoint_path).resolve())  # absolute path for PEFT
+    print(f"Loading CNN+LoRA from {ckpt}...")
     base = Qwen2VLForConditionalGeneration.from_pretrained(
         "Qwen/Qwen2-VL-2B-Instruct",
         torch_dtype=torch.float16,
         device_map="auto",
         trust_remote_code=True,
     )
-    model = PeftModel.from_pretrained(base, str(checkpoint_path))
+    model = PeftModel.from_pretrained(base, ckpt)
     model.eval()
 
     processor = AutoProcessor.from_pretrained(
@@ -148,7 +150,7 @@ def load_cnn_lora_model(checkpoint_path, num_tokens=4):
     )
 
     # Load ForensicCNN
-    cnn_path = Path(checkpoint_path) / "forensic_cnn.pt"
+    cnn_path = Path(ckpt) / "forensic_cnn.pt"
     hidden_size = 1536  # Qwen2-VL-2B
     cnn = ForensicCNN(hidden_size=hidden_size, num_tokens=num_tokens)
     cnn.load_state_dict(torch.load(cnn_path, map_location="cpu"))
