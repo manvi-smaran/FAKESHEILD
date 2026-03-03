@@ -376,6 +376,7 @@ def generate_approach_a(
     cnn_model, cnn_processor, cnn,
     real_samples, fake_samples,
     num_tokens=4,
+    figure_idx=0,
 ):
     """
     Generate Fig: 2×4 grid of dataset samples.
@@ -465,7 +466,8 @@ def generate_approach_a(
         ha="center", fontsize=8, color="#777777",
     )
 
-    output_path = OUTPUT_DIR / "9_visual_results_grid.png"
+    suffix = chr(ord('a') + figure_idx)  # a, b, c, ...
+    output_path = OUTPUT_DIR / f"9{suffix}_visual_results_grid.png"
     fig.savefig(output_path)
     plt.close(fig)
     print(f"\n  [SAVED] {output_path}")
@@ -482,6 +484,7 @@ def generate_approach_b(
     cnn_model, cnn_processor, cnn,
     real_samples, fake_samples,
     num_tokens=4,
+    figure_idx=0,
 ):
     """
     Generate Fig: 2×4 pipeline showing 1 real + 1 fake image through all 4 methods.
@@ -608,7 +611,8 @@ def generate_approach_b(
         ha="center", fontsize=8, color="#999999", fontweight="bold",
     )
 
-    output_path = OUTPUT_DIR / "10_visual_results_pipeline.png"
+    suffix = chr(ord('a') + figure_idx)
+    output_path = OUTPUT_DIR / f"10{suffix}_visual_results_pipeline.png"
     fig.savefig(output_path)
     plt.close(fig)
     print(f"\n  [SAVED] {output_path}")
@@ -644,6 +648,8 @@ def main():
     parser.add_argument("--n_fake", type=int, default=4, help="Number of fake samples (Approach A)")
     parser.add_argument("--num_tokens", type=int, default=4, help="Forensic token count")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--num_figures", type=int, default=3,
+                        help="Number of figures to generate per approach (each uses different samples)")
     args = parser.parse_args()
 
     do_a = args.approach in ("A", "both")
@@ -659,6 +665,7 @@ def main():
     print(f"  CNN+LoRA ckpt:  {args.checkpoint_cnn_lora}")
     if args.checkpoint_lora:
         print(f"  LoRA ckpt:      {args.checkpoint_lora}")
+    print(f"  Num figures:    {args.num_figures}")
     print(f"  Dataset:        {args.dataset}")
     print("=" * 56 + "\n")
 
@@ -666,13 +673,7 @@ def main():
     with open(args.config) as f:
         config = yaml.safe_load(f)
 
-    # Select samples
-    real_samples, fake_samples = select_samples(
-        config, args.dataset,
-        n_real=args.n_real, n_fake=args.n_fake, seed=args.seed,
-    )
-
-    # Load models (load base model first, reuse for zero-shot and few-shot)
+    # Load models (load once, reuse for all figures)
     print("\n--- Loading Models ---")
     base_model, base_processor = load_base_model()
     cnn_model, cnn_processor, cnn = load_cnn_lora_model(
@@ -683,25 +684,41 @@ def main():
     if do_b:
         lora_model, lora_processor = load_lora_model(args.checkpoint_lora)
 
-    # Generate figures
-    if do_a:
-        print("\n--- Approach A: Sample Grid ---")
-        generate_approach_a(
-            base_model, base_processor,
-            cnn_model, cnn_processor, cnn,
-            real_samples, fake_samples,
-            num_tokens=args.num_tokens,
+    # Generate multiple figures with different seeds
+    for fig_idx in range(args.num_figures):
+        current_seed = args.seed + fig_idx
+        print(f"\n{'='*56}")
+        print(f"  Figure set {fig_idx + 1}/{args.num_figures} (seed={current_seed})")
+        print(f"{'='*56}")
+
+        # For Approach A: pick n_real + n_fake fresh samples
+        # For Approach B: pick 1 real + 1 fake (use offset into shuffled list)
+        real_samples, fake_samples = select_samples(
+            config, args.dataset,
+            n_real=max(args.n_real, 1), n_fake=max(args.n_fake, 1),
+            seed=current_seed,
         )
 
-    if do_b:
-        print("\n--- Approach B: Pipeline Flow ---")
-        generate_approach_b(
-            base_model, base_processor,
-            lora_model, lora_processor,
-            cnn_model, cnn_processor, cnn,
-            real_samples, fake_samples,
-            num_tokens=args.num_tokens,
-        )
+        if do_a:
+            print(f"\n--- Approach A: Sample Grid (set {fig_idx + 1}) ---")
+            generate_approach_a(
+                base_model, base_processor,
+                cnn_model, cnn_processor, cnn,
+                real_samples[:args.n_real], fake_samples[:args.n_fake],
+                num_tokens=args.num_tokens,
+                figure_idx=fig_idx,
+            )
+
+        if do_b:
+            print(f"\n--- Approach B: Pipeline Flow (set {fig_idx + 1}) ---")
+            generate_approach_b(
+                base_model, base_processor,
+                lora_model, lora_processor,
+                cnn_model, cnn_processor, cnn,
+                real_samples, fake_samples,
+                num_tokens=args.num_tokens,
+                figure_idx=fig_idx,
+            )
 
     print("\n" + "=" * 56)
     print("  All visual results saved to results/charts/")
