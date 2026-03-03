@@ -384,7 +384,7 @@ def generate_approach_a(
     Each cell shows the image, ground truth, zero-shot p_fake, CNN+LoRA p_fake.
     """
     n_cols = max(len(real_samples), len(fake_samples))
-    fig = plt.figure(figsize=(3.2 * n_cols, 8.5))
+    fig = plt.figure(figsize=(3.2 * n_cols, 11.0))
 
     # Title
     fig.suptitle(
@@ -394,13 +394,46 @@ def generate_approach_a(
 
     # Subtitle
     fig.text(
-        0.5, 0.945,
+        0.5, 0.955,
         "Zero-shot assigns near-identical scores to real and fake; "
         "CNN+LoRA produces well-separated predictions",
         ha="center", fontsize=9, style="italic", color="#666666",
     )
 
-    gs = gridspec.GridSpec(2, n_cols, hspace=0.45, wspace=0.25, top=0.90, bottom=0.04)
+    # --- Prompt boxes ---
+    zs_prompt_text = (
+        'Prompt (Zero-Shot):\n'
+        '"Analyze this facial image carefully for signs of\n'
+        'deepfake manipulation. Look for: facial inconsistencies,\n'
+        'boundary artifacts, unnatural lighting, texture anomalies.\n'
+        'Is this image Real or Fake? Answer with one word:"'
+    )
+    ft_prompt_text = (
+        'Prompt (CNN+LoRA Fine-Tuned):\n'
+        '"Classify authenticity.\n'
+        'Answer with exactly one word: Real or Fake.\n'
+        'Answer:"\n'
+        '+ ForensicCNN tokens injected'
+    )
+
+    # Left prompt box (zero-shot)
+    fig.text(
+        0.26, 0.925, zs_prompt_text,
+        ha="center", va="top", fontsize=7.5,
+        family="monospace",
+        bbox=dict(boxstyle="round,pad=0.5", facecolor="#F5F5F5",
+                  edgecolor=CLR_ZS, alpha=0.95, linewidth=1.5),
+    )
+    # Right prompt box (CNN+LoRA)
+    fig.text(
+        0.74, 0.925, ft_prompt_text,
+        ha="center", va="top", fontsize=7.5,
+        family="monospace",
+        bbox=dict(boxstyle="round,pad=0.5", facecolor="#FFF8F0",
+                  edgecolor=CLR_CNN, alpha=0.95, linewidth=1.5),
+    )
+
+    gs = gridspec.GridSpec(2, n_cols, hspace=0.45, wspace=0.25, top=0.78, bottom=0.04)
 
     all_samples = [(real_samples, 0, "REAL"), (fake_samples, 1, "FAKE")]
 
@@ -526,22 +559,56 @@ def generate_approach_b(
               f"LoRA={scores['lora']:.3f}  CNN={scores['cnn']:.3f}")
 
     # Build figure
-    fig = plt.figure(figsize=(14, 7.5))
+    fig = plt.figure(figsize=(14, 9.5))
 
     fig.suptitle(
         "Fig. 10:  Pipeline Comparison — Same Image Across Detection Methods",
-        fontsize=13, fontweight="bold", y=0.97,
+        fontsize=13, fontweight="bold", y=0.98,
     )
     fig.text(
-        0.5, 0.925,
+        0.5, 0.955,
         "Only fine-tuned methods correctly separate real from fake; "
         "zero-shot and few-shot fail regardless of prompt",
         ha="center", fontsize=9, style="italic", color="#666666",
     )
 
+    # --- Prompt boxes per method ---
+    prompt_texts = [
+        '"Analyze this facial image\n'
+        'carefully for signs of deepfake\n'
+        'manipulation... Is this image\n'
+        'Real or Fake? Answer with\n'
+        'one word:"',
+        '"You are analyzing facial images\n'
+        'to detect deepfakes. Here are 8\n'
+        'labeled examples: [examples]...\n'
+        'Now analyze this new image.\n'
+        'Real or Fake?"',
+        '"Classify authenticity.\n'
+        'Answer with exactly one word:\n'
+        'Real or Fake.\n'
+        'Answer:"',
+        '"Classify authenticity.\n'
+        'Answer with exactly one word:\n'
+        'Real or Fake.\n'
+        'Answer:"\n'
+        '+ ForensicCNN tokens',
+    ]
+    prompt_colors = [CLR_ZS, CLR_FS, CLR_LORA, CLR_CNN]
+    prompt_x_positions = [0.145, 0.385, 0.625, 0.865]
+
+    for px, ptxt, pclr in zip(prompt_x_positions, prompt_texts, prompt_colors):
+        fig.text(
+            px, 0.925, ptxt,
+            ha="center", va="top", fontsize=6.5,
+            family="monospace",
+            bbox=dict(boxstyle="round,pad=0.4", facecolor="#FAFAFA",
+                      edgecolor=pclr, alpha=0.95, linewidth=1.3),
+        )
+
     gs = gridspec.GridSpec(
         2, 4, hspace=0.50, wspace=0.20,
-        top=0.87, bottom=0.08, left=0.04, right=0.96,
+        top=0.73, bottom=0.08, left=0.04, right=0.96,
     )
 
     rows = [
@@ -606,7 +673,7 @@ def generate_approach_b(
 
     # Arrow annotation between no-training and fine-tuned
     fig.text(
-        0.50, 0.91,
+        0.50, 0.76,
         "◄── No Training ──┤── Fine-Tuned ──►",
         ha="center", fontsize=8, color="#999999", fontweight="bold",
     )
