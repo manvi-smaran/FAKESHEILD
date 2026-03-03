@@ -714,10 +714,16 @@ def main():
     parser.add_argument("--n_real", type=int, default=4, help="Number of real samples (Approach A)")
     parser.add_argument("--n_fake", type=int, default=4, help="Number of fake samples (Approach A)")
     parser.add_argument("--num_tokens", type=int, default=4, help="Forensic token count")
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Random seed (default: random each run, set for reproducibility)")
     parser.add_argument("--num_figures", type=int, default=3,
                         help="Number of figures to generate per approach (each uses different samples)")
     args = parser.parse_args()
+
+    # Generate random seed if not specified
+    if args.seed is None:
+        args.seed = random.randint(0, 99999)
+        print(f"  [INFO] Using random seed: {args.seed} (pass --seed {args.seed} to reproduce)")
 
     do_a = args.approach in ("A", "both")
     do_b = args.approach in ("B", "both")
